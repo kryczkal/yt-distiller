@@ -126,6 +126,10 @@ cd e2e && npm install && xvfb-run -a node extension-e2e.mjs <videoId>
 cd e2e && xvfb-run -a node mark-watched-test.mjs
 ```
 
+## License
+
+MIT — see [`LICENSE`](LICENSE).
+
 ## Acknowledgements
 
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) — transcript extraction.
