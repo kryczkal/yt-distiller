@@ -39,25 +39,25 @@ function createMenus() {
 chrome.runtime.onInstalled.addListener(createMenus);
 chrome.runtime.onStartup.addListener(createMenus);
 
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId !== "ytd-link" && info.menuItemId !== "ytd-page") return;
   const source = info.linkUrl || info.pageUrl || tab?.url || "";
   const videoId = extractVideoId(source);
   if (!videoId) return;
 
+  // open() must be the FIRST call in this gesture turn — any preceding `await`
+  // spends the user gesture and Chrome rejects the open. So open synchronously,
+  // then fire the async storage/message work (no await needed before open).
+  if (tab?.windowId != null) {
+    chrome.sidePanel
+      .open({ windowId: tab.windowId })
+      .catch((e) => console.warn("sidePanel.open failed:", e));
+  }
+
   // Stash for the panel to pick up on (re)load, and message it if already open.
-  await chrome.storage.session.set({
+  chrome.storage.session.set({
     pending: { videoId, url: watchUrl(videoId), ts: Date.now() },
   });
-
-  if (tab?.windowId != null) {
-    try {
-      await chrome.sidePanel.open({ windowId: tab.windowId });
-    } catch (e) {
-      // open() must run in a user gesture; the context-menu click qualifies.
-      console.warn("sidePanel.open failed:", e);
-    }
-  }
   chrome.runtime.sendMessage({ type: "summarize", videoId }).catch(() => {});
 });
 
