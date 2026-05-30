@@ -1,5 +1,5 @@
 node_modules/
 *.log
 .DS_Store
-e2e/e2e-sidepanel.png
+e2e/*.png
 **/.config/

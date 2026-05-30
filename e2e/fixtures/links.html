@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>native context-menu test</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; background: #fff; color: #222; margin: 40px; }
+  a.video {
+    display: block; width: 540px; height: 140px; margin: 18px 0; padding: 16px;
+    background: #f1f1f4; border: 1px solid #ccc; border-radius: 10px;
+    text-decoration: none; color: #222; box-sizing: border-box;
+  }
+  a.video b { color: #c00; font-size: 18px; }
+  .hint { color: #888; font-size: 13px; }
+</style>
+<h2>Right-click a "video" — these are real youtube.com/watch links</h2>
+<a id="yt" class="video" href="https://www.youtube.com/watch?v=Gjnup-PuquQ">
+  <b>▶ Docker in 100 Seconds</b><br />
+  youtube.com/watch?v=Gjnup-PuquQ<br />
+  <span class="hint">right-click me → the extension's “✦ Distill this video” item should appear</span>
+</a>
+<a class="video" href="https://www.youtube.com/watch?v=bHIhgxav9LY">
+  <b>▶ The Biggest Misconception About Electricity</b><br />
+  youtube.com/watch?v=bHIhgxav9LY
+</a>
