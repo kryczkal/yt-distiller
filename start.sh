@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Launch the yt-distill backend with subscription-safe auth.
 set -euo pipefail
-cd "$(dirname "$0")/backend"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT/backend"
 
 # Subscription auth guard: a stray ANTHROPIC_API_KEY outranks the Claude
 # subscription token in the SDK's auth precedence — i.e. it would silently bill
@@ -26,4 +27,5 @@ echo "────────────────────────�
 echo " yt-distill backend starting"
 echo " Paste the token printed below into the extension's ⚙ settings (once)."
 echo "─────────────────────────────────────────────"
-exec node server.js
+# Load .env from project root (preferred) and backend/, before any module reads env.
+exec node --env-file-if-exists="$ROOT/.env" --env-file-if-exists=.env server.js

@@ -16,8 +16,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { getTranscript, extractVideoId } from "./lib/transcript.js";
+import { getTranscript, fetchVideoInfo, extractVideoId, normalizeUrl } from "./lib/transcript.js";
 import { distill } from "./lib/distill.js";
+import { distillViaGemini, geminiAvailable } from "./lib/gemini.js";
+
+// Load .env (project root or backend/) if present — for GEMINI_API_KEY etc.
+// (start.sh also passes --env-file-if-exists so import-time reads see it too.)
+for (const p of [path.join(import.meta.dirname, "..", ".env"), path.join(import.meta.dirname, ".env")]) {
+  try { process.loadEnvFile(p); } catch {}
+}
 
 const PORT = Number(process.env.YT_DISTILL_PORT || 8765);
 const HOST = "127.0.0.1";
@@ -83,7 +90,7 @@ const server = http.createServer(async (req, res) => {
 
   // Health check — no auth, lets the extension detect "backend up".
   if (req.method === "GET" && url.pathname === "/health") {
-    sendJson(res, 200, { ok: true, service: "yt-distill", version: VERSION });
+    sendJson(res, 200, { ok: true, service: "yt-distill", version: VERSION, gemini: geminiAvailable() });
     return;
   }
 
@@ -108,6 +115,7 @@ const server = http.createServer(async (req, res) => {
     }
     const lang = payload.lang || "en";
     const model = payload.model || undefined;
+    const mode = payload.mode || "auto"; // "auto" = transcript→Claude (Gemini if no captions); "video" = force Gemini
 
     // Stream NDJSON.
     res.writeHead(200, {
@@ -116,38 +124,53 @@ const server = http.createServer(async (req, res) => {
       "x-accel-buffering": "no",
     });
     const write = (obj) => res.write(JSON.stringify(obj) + "\n");
+    const watchUrl = normalizeUrl(input);
 
-    const vid = extractVideoId(input) || input;
-    try {
-      const video = await getTranscript(input, { lang });
-      write({
-        type: "meta",
-        id: video.id,
-        title: video.title,
-        channel: video.channel,
-        duration: video.duration,
-        captionKind: video.captionKind,
-        url: video.url,
-      });
-
-      const { text, usage, rateLimitType } = await distill(video, {
-        model,
-        onText: (chunk) => write({ type: "delta", text: chunk }),
-      });
-
-      write({ type: "done", text, usage, rateLimitType });
-    } catch (e) {
-      write({
-        type: "error",
-        code: e.code || "ERROR",
-        message: e.message || String(e),
-        videoId: vid,
-        available: e.available || undefined,
-      });
-    } finally {
-      res.end();
+    // Force the Gemini visual path (manual "⟳ from video" button).
+    if (mode === "video") {
+      if (!geminiAvailable()) {
+        write({ type: "error", code: "NO_GEMINI_KEY", message: "Set GEMINI_API_KEY on the backend to use the video path." });
+        return res.end();
+      }
+      try {
+        let meta = {};
+        try { const i = await fetchVideoInfo(input); meta = { id: i.id, title: i.title, channel: i.channel || i.uploader, duration: i.duration_string }; } catch {}
+        write({ type: "meta", ...meta, captionKind: "Gemini (watching video)", url: watchUrl });
+        const r = await distillViaGemini(watchUrl, { onText: (c) => write({ type: "delta", text: c }) });
+        write({ type: "done", text: r.text, source: "gemini" });
+      } catch (e) {
+        write({ type: "error", code: e.code || "GEMINI_ERROR", message: e.message || String(e) });
+      }
+      return res.end();
     }
-    return;
+
+    // Default: transcript → Claude. On NO_TRANSCRIPT, auto-escalate to Gemini.
+    let video;
+    try {
+      video = await getTranscript(input, { lang });
+    } catch (e) {
+      if (e.code === "NO_TRANSCRIPT" && geminiAvailable()) {
+        write({ type: "meta", id: e.meta?.id, title: e.meta?.title, channel: e.meta?.channel, duration: e.meta?.duration, captionKind: "no captions → Gemini video", url: e.meta?.url || watchUrl });
+        try {
+          const r = await distillViaGemini(e.meta?.url || watchUrl, { onText: (c) => write({ type: "delta", text: c }) });
+          write({ type: "done", text: r.text, source: "gemini" });
+        } catch (ge) {
+          write({ type: "error", code: ge.code || "GEMINI_ERROR", message: ge.message || String(ge) });
+        }
+        return res.end();
+      }
+      write({ type: "error", code: e.code || "ERROR", message: e.message || String(e), videoId: extractVideoId(input) || input, available: e.available });
+      return res.end();
+    }
+
+    try {
+      write({ type: "meta", id: video.id, title: video.title, channel: video.channel, duration: video.duration, captionKind: video.captionKind, url: video.url });
+      const { text, usage, rateLimitType } = await distill(video, { model, onText: (c) => write({ type: "delta", text: c }) });
+      write({ type: "done", text, usage, rateLimitType, source: "claude" });
+    } catch (e) {
+      write({ type: "error", code: e.code || "ERROR", message: e.message || String(e) });
+    }
+    return res.end();
   }
 
   sendJson(res, 404, { error: "not found" });

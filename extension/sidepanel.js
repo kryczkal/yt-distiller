@@ -9,6 +9,7 @@ marked.setOptions({ gfm: true, breaks: false });
 const $ = (id) => document.getElementById(id);
 const cfg = { backendUrl: DEFAULT_BACKEND, token: "" };
 let currentRun = 0;
+let lastVideoId = null;
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -28,8 +29,9 @@ function showMeta(m) {
     `<div class="sub">${[m.channel, m.duration, m.captionKind].filter(Boolean).map(esc).join(" · ")}</div>`;
 }
 
-async function summarize(videoId) {
+async function summarize(videoId, { mode = "auto" } = {}) {
   const id = extractVideoId(videoId) || videoId;
+  lastVideoId = id;
   const run = ++currentRun;
   $("empty").hidden = true;
   $("meta").innerHTML = "";
@@ -41,7 +43,7 @@ async function summarize(videoId) {
     const resp = await fetch(`${cfg.backendUrl}/summarize`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-yt-distill-token": cfg.token },
-      body: JSON.stringify({ videoId: id }),
+      body: JSON.stringify({ videoId: id, mode }),
     });
 
     if (resp.status === 401) {
@@ -77,7 +79,8 @@ async function summarize(videoId) {
           renderMd(acc);
           const rl = msg.rateLimitType === "five_hour" ? "subscription" : (msg.rateLimitType || "");
           const out = msg.usage?.output_tokens;
-          setStatus(`✦ Distilled${out ? ` · ${out} tokens` : ""}${rl ? ` · ${rl}` : ""}`);
+          const src = msg.source === "gemini" ? " · Gemini (watched video)" : "";
+          setStatus(`✦ Distilled${out ? ` · ${out} tokens` : ""}${rl ? ` · ${rl}` : ""}${src}`);
         } else if (msg.type === "error") {
           if (msg.code === "NO_TRANSCRIPT") {
             setStatus(
@@ -112,6 +115,11 @@ $("tab").addEventListener("click", async () => {
   const v = extractVideoId(tab?.url || "");
   if (v) summarize(v);
   else setStatus("⚠️ The current tab isn't a YouTube video.");
+});
+$("video").addEventListener("click", () => {
+  const v = lastVideoId || extractVideoId($("url-input").value.trim());
+  if (v) summarize(v, { mode: "video" });
+  else setStatus("⚠️ Distill a video first (or paste a URL), then re-run from the video.");
 });
 
 chrome.runtime.onMessage.addListener((m) => {

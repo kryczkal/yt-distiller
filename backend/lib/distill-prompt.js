@@ -54,6 +54,21 @@ HARD CONSTRAINTS:
     interview/podcast -> the substantive claims each speaker makes, attributed when it matters
 - Output GitHub-flavored Markdown.`;
 
+// Video-input variant — used when Gemini watches the actual video (no transcript,
+// or visual-heavy content). Same distillation philosophy; the input is the video
+// itself, so on-screen-only information becomes load-bearing.
+export const SUMMARIZER_SYSTEM_VIDEO = SUMMARIZER_SYSTEM
+  .replace(
+    "You receive the video's transcript (often auto-generated, therefore noisy) plus its title and channel.",
+    "You are WATCHING the actual video (audio + frames). There is no usable transcript, which is exactly why you watch instead of read."
+  )
+  .replace(
+    "GOVERNING RULE — compress the DELIVERY, never the KNOWLEDGE.",
+    `CAPTURE ON-SCREEN-ONLY INFORMATION that is never spoken: code, commands, terminal output, URLs, config, numbers on slides/charts, diagrams, UI steps in a demo. This is the whole point of watching the video — read it off the screen and preserve it verbatim.
+
+GOVERNING RULE — compress the DELIVERY, never the KNOWLEDGE.`
+  );
+
 /**
  * Build the user-turn prompt fed to the model alongside SUMMARIZER_SYSTEM.
  * @param {{title?:string, channel?:string, duration?:string, captionKind?:string, transcript:string}} v

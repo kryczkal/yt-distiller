@@ -43,6 +43,8 @@ It prints a line like `token: AbC123…`. Copy it. (It's also stored at `~/.conf
 
 The launcher unsets `ANTHROPIC_API_KEY` so usage bills to your subscription, never the API.
 
+**Optional — Gemini visual fallback:** `cp .env.example .env` and put a free key (from [aistudio.google.com/apikey](https://aistudio.google.com/apikey)) in `GEMINI_API_KEY`. `./start.sh` loads it; `curl localhost:8765/health` should then show `"gemini":true`.
+
 ### 2. Load the extension
 
 1. Open `brave://extensions` (or `chrome://extensions`)
@@ -56,6 +58,15 @@ Right-click any YouTube video — a thumbnail in your feed, a search result, the
 
 You can also click the toolbar icon to open the panel, then paste a URL or hit **Tab** to distill the current tab.
 
+### Visual fallback (Gemini, optional)
+
+Default path is transcript → Claude (covers ~95% of videos). With `GEMINI_API_KEY` set:
+
+- **Auto:** a video with **no captions** falls back to Gemini *watching* the video.
+- **Manual:** the **⟳ video** button re-distills by watching the video — for visual-heavy content (coding demos, slides, charts) where the spoken words miss what's on screen.
+
+Gemini's free tier accepts **public videos only** (not private/unlisted).
+
 ## Configuration (env vars for the backend)
 
 | Var | Default | Purpose |
@@ -64,6 +75,10 @@ You can also click the toolbar icon to open the panel, then paste a URL or hit *
 | `YT_DISTILL_TOKEN` | generated | Shared secret (override to a fixed value if you like) |
 | `YT_DISTILL_MODEL` | `claude-sonnet-4-6` | Distillation model |
 | `YT_DISTILL_COOKIES_FROM_BROWSER` | _unset_ | e.g. `brave` — read cookies for age-gated/region-locked videos |
+| `GEMINI_API_KEY` | _unset_ | Enables the Gemini visual fallback (free tier; public videos only) |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model for the video path |
+
+Put these in a `.env` (project root) — see `.env.example`. `./start.sh` loads it automatically.
 
 ## Notes on the subscription path
 
