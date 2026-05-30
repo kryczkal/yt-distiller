@@ -25,6 +25,7 @@ const ICON = {
   err: '<svg class="icon err" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg>',
   copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+  eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>',
 };
 
 function setStatus(html) { $("status").innerHTML = html; }
@@ -71,6 +72,7 @@ function summarize(videoId, { mode = "auto" } = {}) {
   const run = ++currentRun;
   $("empty").hidden = true;
   $("receipt").hidden = true;
+  resetWatchBtn();
   $("meta").innerHTML = "";
   lastMarkdown = "";
   showSkeleton();
@@ -197,6 +199,164 @@ $("copy").addEventListener("click", async () => {
     btn.innerHTML = ICON.copy + '<span class="copy-label">Press ⌘C</span>';
   }
 });
+
+// --- mark as watched (nudge YouTube's recommendations) ---
+// Opens the video in a background tab, force-plays it muted at 2× to clock real
+// watch-time (the dominant "recommend more like this" signal), best-effort Likes
+// it, then closes the tab. Entirely client-side — the native host isn't involved.
+const WATCH = { targetSec: 25, maxWallMs: 18000, rate: 2, like: true, loadTimeoutMs: 15000 };
+let watching = false;
+
+function setWatchBtn(state, label, { disabled = false } = {}) {
+  const btn = $("watch");
+  btn.classList.remove("busy", "done", "err");
+  if (state === "busy" || state === "done" || state === "err") btn.classList.add(state);
+  const icon =
+    state === "busy" ? '<span class="spin"></span>'
+    : state === "done" ? ICON.check
+    : state === "err" ? ICON.warn
+    : ICON.eye;
+  btn.innerHTML = icon + `<span class="watch-label">${esc(label)}</span>`;
+  btn.disabled = disabled;
+}
+function resetWatchBtn() {
+  watching = false;
+  setWatchBtn("idle", "Mark watched", { disabled: false });
+}
+
+// Briefly show a line in the status area, then restore it — but never clobber a
+// status that something else (e.g. a new distill) set in the meantime.
+function flashStatus(html, ms = 5000) {
+  setStatus(html);
+  const snapshot = $("status").innerHTML;
+  setTimeout(() => { if ($("status").innerHTML === snapshot) clearStatus(); }, ms);
+}
+
+function waitForTabComplete(tabId, timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      try { chrome.tabs.onUpdated.removeListener(listener); } catch {}
+      clearTimeout(timer);
+      resolve();
+    };
+    const listener = (id, info) => { if (id === tabId && info.status === "complete") finish(); };
+    chrome.tabs.onUpdated.addListener(listener);
+    const timer = setTimeout(finish, timeoutMs);
+    chrome.tabs.get(tabId).then((t) => { if (t?.status === "complete") finish(); }).catch(() => {});
+  });
+}
+
+async function markWatched(videoId) {
+  const id = extractVideoId(videoId) || videoId;
+  if (!id || watching) return;
+  watching = true;
+  setWatchBtn("busy", "Opening…", { disabled: true });
+
+  let tab = null;
+  try {
+    tab = await chrome.tabs.create({ url: watchUrl(id), active: false });
+    await waitForTabComplete(tab.id, WATCH.loadTimeoutMs);
+    setWatchBtn("busy", WATCH.like ? "Watching + liking…" : "Watching…", { disabled: true });
+
+    const [inj] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: engagePage,
+      args: [{ targetSec: WATCH.targetSec, maxWallMs: WATCH.maxWallMs, rate: WATCH.rate, doLike: WATCH.like }],
+    });
+    const res = inj?.result || {};
+
+    if (res.watched) {
+      const likedNote = WATCH.like ? (res.liked ? " + liked" : ", but couldn’t find the Like button") : "";
+      setWatchBtn("done", res.liked ? "Watched + liked" : "Watched", { disabled: true });
+      flashStatus(`${ICON.check} Marked as watched${likedNote}. YouTube will factor this into your recommendations.`);
+    } else {
+      setWatchBtn("err", "Try again", { disabled: false });
+      flashStatus(`${ICON.warn} Couldn’t register a watch — the player never started. Try again.`, 7000);
+    }
+  } catch (e) {
+    setWatchBtn("err", "Try again", { disabled: false });
+    const msg = String(e?.message || e || "");
+    const hint = /cannot access|permission|host/i.test(msg)
+      ? " If you just updated the extension, reload it at chrome://extensions to grant youtube.com access."
+      : "";
+    flashStatus(`${ICON.err} Couldn’t mark watched: ${esc(msg)}.${hint}`, 8000);
+  } finally {
+    if (tab?.id != null) { try { await chrome.tabs.remove(tab.id); } catch {} }
+    watching = false;
+  }
+}
+
+$("watch").addEventListener("click", () => { if (lastVideoId) markWatched(lastVideoId); });
+
+// Injected into the (background) watch tab. Self-contained — no outer scope, no
+// imports — because chrome.scripting serializes it as source. Drives the standard
+// HTML5 <video> (a web standard, far more stable than YouTube's button DOM). The
+// Like click is strictly best-effort and guarded so it can never un-like or hit
+// Dislike.
+async function engagePage({ targetSec, maxWallMs, rate, doLike }) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const deadline = Date.now() + maxWallMs;
+
+  let v = null;
+  while (Date.now() < deadline) {
+    v = document.querySelector("video");
+    if (v && v.readyState >= 2) break;
+    await sleep(250);
+  }
+  if (!v) return { watched: false, liked: false, reason: "no-video" };
+
+  const pin = () => {
+    try { v.muted = true; v.volume = 0; } catch {}
+    try { if (rate && v.playbackRate !== rate) v.playbackRate = rate; } catch {}
+  };
+  const play = async () => { try { await v.play(); } catch {} };
+
+  pin();
+  await play();
+
+  const dur = v.duration && isFinite(v.duration) ? v.duration : 0;
+  const target = Math.max(5, dur ? Math.min(targetSec, dur - 1) : targetSec);
+  const startCt = v.currentTime || 0;
+  let advanced = 0;
+
+  while (Date.now() < deadline) {
+    const skip = document.querySelector(
+      ".ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button"
+    );
+    if (skip) { try { skip.click(); } catch {} }
+    pin();
+    if (v.paused || v.ended) await play();
+    advanced = (v.currentTime || 0) - startCt;
+    if (advanced >= target || v.ended) break;
+    await sleep(500);
+  }
+
+  let liked = false;
+  if (doLike) liked = clickLike();
+
+  return { watched: advanced > 0 || (v.currentTime || 0) > startCt, liked, advanced: Math.round(advanced) };
+
+  function clickLike() {
+    // The like component is its own element, separate from dislike, so targeting
+    // it can't toggle the wrong button.
+    let btn =
+      document.querySelector("ytd-watch-metadata like-button-view-model button") ||
+      document.querySelector("like-button-view-model button");
+    if (!btn) {
+      // Heuristic fallback: a control labelled "like" but never "dislike".
+      const labelOf = (b) => (b.getAttribute("aria-label") || b.getAttribute("title") || "").trim();
+      btn = Array.from(document.querySelectorAll("button[aria-label], button[title]"))
+        .find((b) => { const s = labelOf(b); return /\blike\b/i.test(s) && !/dislike/i.test(s); }) || null;
+    }
+    if (!btn) return false;
+    if (btn.getAttribute("aria-pressed") === "true") return true; // already liked — don't toggle off
+    try { btn.click(); } catch { return false; }
+    return true;
+  }
+}
 
 // --- reading text size ---
 const BASE_PX = 15.5, MIN_PX = 12, MAX_PX = 24, STEP_PX = 1.5;

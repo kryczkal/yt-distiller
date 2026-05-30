@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "description": "Right-click any YouTube video → a tight, fluff-free distillation of its knowledge. Runs on your Claude subscription via an on-demand local host.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwFKCqIZDUiO6INj8nAFmP51g9Oyzp57/3DEtVPNj5Uxou4o/J1gkr80ehkmqEFVJAQCWeVLc5I/O4sjC/Cg2YfbpsmltK8mG3WJzDERaZQWwIc/Jp3hMvF9S5ott+04emvarZh1IKhn3TBkZ6TEVgTqCoXH6bFAN7Tikweg+MzLYnpJyxrz9K6hwxJmFTuBx6qQvt8Pkziiahwz+ObZb4KPQr+FozuJWZoQ6O73SI8yjgL0F0FMFtC0yguHWVMopDsHd75s7QCt8JUr3Kq0z7uhuN43nKN9sl6WNB9S4m6DEd7fa3MuNxbrhJ/XLGF9Pf2K9ClHgVT+tGlv7tXjywQIDAQAB",
-  "permissions": ["contextMenus", "sidePanel", "storage", "tabs", "nativeMessaging"],
+  "permissions": ["contextMenus", "sidePanel", "storage", "tabs", "nativeMessaging", "scripting"],
+  "host_permissions": ["*://*.youtube.com/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

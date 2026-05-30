@@ -284,8 +284,10 @@ body {
 #receipt-text .spark { flex: none; width: 13px; height: 13px; fill: var(--accent); }
 #receipt-text .body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.receipt-actions { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; }
+
 .ghost-btn {
-  margin-left: auto; flex: none;
+  flex: none;
   display: inline-flex; align-items: center; gap: 5px;
   padding: 5px 10px;
   background: transparent; color: var(--dim);
@@ -296,6 +298,13 @@ body {
 .ghost-btn:hover { color: var(--accent); border-color: var(--accent); }
 .ghost-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .ghost-btn.done { color: var(--accent); border-color: transparent; }
+.ghost-btn:disabled { cursor: default; opacity: .9; }
+.ghost-btn.busy { color: var(--dim); border-color: var(--border); }
+.ghost-btn.busy:hover { color: var(--dim); border-color: var(--border); }
+.ghost-btn.err { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.ghost-btn.err:hover { color: var(--danger); border-color: var(--danger); }
+/* the busy spinner sits where the icon was; keep it from inheriting svg sizing */
+#watch .spin { margin-right: 0; }
 
 /* ---------- reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
