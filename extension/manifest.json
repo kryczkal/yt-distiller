@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Distiller",
+  "version": "0.1.0",
+  "description": "Right-click any YouTube video → a tight, fluff-free distillation of its knowledge. Runs on your Claude subscription via a local backend.",
+  "permissions": ["contextMenus", "sidePanel", "storage", "tabs"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "YouTube Distiller — open panel",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

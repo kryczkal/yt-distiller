@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YouTube Distiller</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">✦ Distiller</div>
+    <div class="controls">
+      <input id="url-input" type="text" placeholder="Paste a YouTube URL…" spellcheck="false" />
+      <button id="go" title="Distill">Go</button>
+      <button id="tab" title="Distill the current tab">Tab</button>
+      <button id="opts" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <div id="meta"></div>
+  <div id="status"></div>
+
+  <article id="summary"></article>
+
+  <div id="empty">
+    <p><b>Right-click any YouTube video</b> → <b>✦ Distill this video</b>.</p>
+    <p>Works on thumbnails in your feed, search results, the sidebar, or the watch page — you don't have to open the video.</p>
+    <p class="dim">Or paste a URL above. Needs the local backend running.</p>
+  </div>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
