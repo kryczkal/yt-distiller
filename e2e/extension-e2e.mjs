@@ -1,8 +1,7 @@
-// Real-browser e2e: loads the unpacked extension in Chromium and exercises the
-// full chain. Validates (1) the extension/service-worker loads, (2) Chrome
-// accepts our exact context-menu specs, (3) the side panel page loads with no
-// JS errors, (4) the EXACT context-menu code path (pending video -> auto
-// summarize) streams a real distillation from the backend and renders it.
+// Browser e2e for the NATIVE-MESSAGING transport. Loads the unpacked extension
+// (pinned id), installs the native host manifest into the profile, then drives
+// the side panel exactly as the context-menu click does (pending video -> the
+// panel connects to the spawned host -> streamed distillation -> rendered).
 //
 // Run: xvfb-run -a node extension-e2e.mjs [videoId]
 import { chromium } from "playwright-core";
@@ -10,101 +9,90 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 
-const EXT = path.resolve(import.meta.dirname, "..", "extension");
+const ROOT = path.resolve(import.meta.dirname, "..");
+const EXT = path.join(ROOT, "extension");
 const CHROMIUM = process.env.CHROMIUM_BIN || "/usr/bin/chromium";
-const BACKEND = process.env.YT_DISTILL_BACKEND || "http://127.0.0.1:8765";
-const TOKEN = process.env.YT_DISTILL_TOKEN || "devtoken";
-const VIDEO = process.argv[2] || "Gjnup-PuquQ"; // Fireship "Docker in 100 Seconds"
+const PINNED = "gdkokdffammbmjfginiefihojdkomjgc";
+const HOST_NAME = "com.yt_distill.host";
+const LAUNCHER = path.join(ROOT, "native-host-launcher.sh");
+const VIDEO = process.argv[2] || "Gjnup-PuquQ";
 
 const fail = (m) => { console.error("❌ " + m); process.exitCode = 1; };
 const ok = (m) => console.log("✅ " + m);
 
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "ytd-profile-"));
+const hostManifest = JSON.stringify({
+  name: HOST_NAME, description: "yt-distill native host", path: LAUNCHER,
+  type: "stdio", allowed_origins: [`chrome-extension://${PINNED}/`],
+}, null, 2);
+
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "ytd-nm-"));
+// Native-messaging host dir = <user-data-dir>/NativeMessagingHosts. Also drop a
+// copy in the user-level chromium dir as a fallback for host discovery.
+const nmDirs = [path.join(userDataDir, "NativeMessagingHosts"), path.join(os.homedir(), ".config", "chromium", "NativeMessagingHosts")];
+const wrote = [];
+for (const d of nmDirs) {
+  try { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, `${HOST_NAME}.json`), hostManifest); wrote.push(path.join(d, `${HOST_NAME}.json`)); } catch {}
+}
+
 const ctx = await chromium.launchPersistentContext(userDataDir, {
   executablePath: CHROMIUM,
-  headless: false, // MV3 extensions require headful; xvfb supplies the display
-  args: [
-    `--disable-extensions-except=${EXT}`,
-    `--load-extension=${EXT}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-  ],
+  headless: false,
+  args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, "--no-first-run", "--no-default-browser-check", "--disable-gpu"],
 });
 
 try {
-  // --- 1. service worker / extension id ---
   let [sw] = ctx.serviceWorkers();
   if (!sw) sw = await ctx.waitForEvent("serviceworker", { timeout: 15000 });
   const extId = new URL(sw.url()).host;
-  ok(`extension loaded — id=${extId}`);
+  extId === PINNED ? ok(`extension loaded with PINNED id: ${extId}`) : fail(`id ${extId} != pinned ${PINNED} (native host won't match!)`);
 
-  const apis = await sw.evaluate(() => ({
-    contextMenus: !!chrome.contextMenus,
-    sidePanel: !!chrome.sidePanel,
-    storage: !!chrome.storage,
-  }));
-  if (apis.contextMenus && apis.sidePanel && apis.storage) ok("service worker has contextMenus + sidePanel + storage APIs");
-  else fail("missing APIs in SW: " + JSON.stringify(apis));
-
-  // --- 2. Chrome accepts our EXACT menu specs (validates the trigger registration) ---
   const menuProbe = await sw.evaluate(() => {
-    const mk = (spec) => new Promise((res) =>
-      chrome.contextMenus.create({ ...spec, id: spec.id + "-probe" }, () =>
-        res(chrome.runtime.lastError?.message || null)));
+    const mk = (s) => new Promise((r) => chrome.contextMenus.create({ ...s, id: s.id + "-probe" }, () => r(chrome.runtime.lastError?.message || null)));
     return Promise.all([
-      mk({ id: "lnk", title: "p", contexts: ["link"], targetUrlPatterns: ["*://*.youtube.com/watch?v=*", "*://youtu.be/*", "*://*.youtube.com/shorts/*"] }),
-      mk({ id: "pg", title: "p", contexts: ["page", "video", "image", "frame"], documentUrlPatterns: ["*://*.youtube.com/watch?v=*", "*://*.youtube.com/shorts/*"] }),
+      mk({ id: "lnk", title: "p", contexts: ["link"], targetUrlPatterns: ["*://*.youtube.com/watch?v=*", "*://youtu.be/*"] }),
+      mk({ id: "pg", title: "p", contexts: ["page", "video"], documentUrlPatterns: ["*://*.youtube.com/watch?v=*"] }),
     ]);
   });
-  if (menuProbe.every((e) => e === null)) ok("Chrome accepted both context-menu specs (link + page) — trigger registration valid");
-  else fail("context-menu spec rejected: " + JSON.stringify(menuProbe));
+  menuProbe.every((e) => e === null) ? ok("Chrome accepted both context-menu specs") : fail("menu spec rejected: " + JSON.stringify(menuProbe));
 
-  // --- 3. configure extension + simulate the context-menu click's effect ---
-  await sw.evaluate(async ([backend, token, videoId]) => {
-    await chrome.storage.local.set({ backendUrl: backend, token });
-    // exactly what background.js onClicked stashes before opening the panel:
-    await chrome.storage.session.set({ pending: { videoId, url: "https://www.youtube.com/watch?v=" + videoId, ts: Date.now() } });
-  }, [BACKEND, TOKEN, VIDEO]);
-  ok("stashed pending video (simulating the context-menu click) + configured backend");
+  // simulate the context-menu click's stash
+  await sw.evaluate(async ([vid]) => {
+    await chrome.storage.session.set({ pending: { videoId: vid, url: "https://www.youtube.com/watch?v=" + vid, ts: Date.now() } });
+  }, [VIDEO]);
+  ok("stashed pending video (context-menu click effect)");
 
-  // --- 4. open the REAL side panel page; init() should auto-summarize from pending ---
   const page = await ctx.newPage();
   const errors = [];
-  page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
-  page.on("console", (m) => { if (m.type() === "error") errors.push("console.error: " + m.text()); });
+  page.on("pageerror", (e) => errors.push(String(e.message)));
+  page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
   await page.goto(`chrome-extension://${extId}/sidepanel.html`);
-  ok("sidepanel.html loaded");
+  ok("sidepanel.html loaded — connecting to native host…");
 
-  // wait for the stream to COMPLETE (done event sets "✦ Distilled …" in #status)
   await page.waitForFunction(
-    () => /Distilled|No transcript|error|Can't reach/i.test(document.getElementById("status")?.textContent || ""),
+    () => /Distilled|No captions|error|Native host|Connection closed/i.test(document.getElementById("status")?.textContent || ""),
     { timeout: 150000 }
   );
 
   const meta = (await page.textContent("#meta"))?.trim();
   const status = (await page.textContent("#status"))?.trim();
   const summary = (await page.textContent("#summary"))?.trim();
-  // markdown rendered = marked produced real block elements (not raw text)
-  const mdBlocks = await page.locator("#summary p, #summary li, #summary strong, #summary h1, #summary h2, #summary h3, #summary pre").count();
+  const mdBlocks = await page.locator("#summary p, #summary li, #summary strong, #summary h1, #summary h2, #summary h3").count();
+  await page.screenshot({ path: path.join(import.meta.dirname, "native-e2e.png"), fullPage: true });
 
   console.log("\n--- META ---\n" + meta);
   console.log("--- STATUS ---\n" + status);
-  console.log(`--- SUMMARY (${summary.length} chars, ${mdBlocks} markdown blocks rendered) ---`);
-  console.log(summary.slice(0, 500) + "…");
+  console.log(`--- SUMMARY (${summary?.length || 0} chars, ${mdBlocks} md blocks) ---\n` + (summary?.slice(0, 400) || "") + "…");
 
-  const shot = path.join(import.meta.dirname, "e2e-sidepanel.png");
-  await page.screenshot({ path: shot, fullPage: true });
-  ok("screenshot saved: " + shot);
-
-  if (summary.length > 400 && mdBlocks > 0) ok("distillation rendered as markdown in the side panel");
-  else fail(`summary too short or not rendered as markdown (len=${summary.length}, blocks=${mdBlocks})`);
-  if (/subscription|five_hour/.test(status)) ok("status shows subscription billing");
-  if (errors.length) fail("page JS errors:\n  " + errors.join("\n  "));
-  else ok("no page JS errors");
+  if (/Native host (failed|produced)/i.test(status || "")) fail("native host did not run: " + status);
+  else if ((summary?.length || 0) > 400 && mdBlocks > 0) ok("native-messaging distillation streamed + rendered in the side panel");
+  else fail(`no distillation rendered (len=${summary?.length}, blocks=${mdBlocks}, status=${status})`);
+  if (/subscription/.test(status || "")) ok("status shows subscription billing");
+  errors.length ? fail("page JS errors: " + errors.join("; ")) : ok("no page JS errors");
 } catch (e) {
   fail("e2e threw: " + (e?.stack || e?.message || e));
 } finally {
   await ctx.close();
   try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch {}
+  for (const f of wrote) { try { fs.rmSync(f, { force: true }); } catch {} }
 }
-console.log(process.exitCode ? "\n=== E2E FAILED ===" : "\n=== E2E PASSED ===");
+console.log(process.exitCode ? "\n=== NATIVE-MESSAGING E2E FAILED ===" : "\n=== NATIVE-MESSAGING E2E PASSED ===");

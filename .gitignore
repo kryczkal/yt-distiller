@@ -1,5 +1,6 @@
 node_modules/
 .env
+*.pem
 *.log
 .DS_Store
 e2e/*.png

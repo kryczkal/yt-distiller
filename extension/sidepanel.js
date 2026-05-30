@@ -1,13 +1,15 @@
-// Side panel: reads the pending video, streams the distillation from the local
-// backend (NDJSON), and renders it as it arrives.
+// Side panel: connects to the native-messaging host (spawned on demand by the
+// browser), streams the distillation back, and renders it as it arrives. No
+// localhost server, no token — the host's allowed_origins binds it to this
+// extension's id.
 
-import { extractVideoId, watchUrl, DEFAULT_BACKEND } from "./util.js";
+import { extractVideoId } from "./util.js";
 import { marked } from "./vendor/marked.esm.js";
 
 marked.setOptions({ gfm: true, breaks: false });
 
+const HOST = "com.yt_distill.host";
 const $ = (id) => document.getElementById(id);
-const cfg = { backendUrl: DEFAULT_BACKEND, token: "" };
 let currentRun = 0;
 let lastVideoId = null;
 
@@ -16,94 +18,88 @@ const esc = (s) =>
 
 function setStatus(html) { $("status").innerHTML = html; }
 function renderMd(md) { $("summary").innerHTML = marked.parse(md); }
-
-async function loadCfg() {
-  const s = await chrome.storage.local.get(["backendUrl", "token"]);
-  if (s.backendUrl) cfg.backendUrl = s.backendUrl;
-  if (s.token) cfg.token = s.token;
-}
-
 function showMeta(m) {
   $("meta").innerHTML =
-    `<div class="title">${esc(m.title || m.id)}</div>` +
+    `<div class="title">${esc(m.title || m.id || "")}</div>` +
     `<div class="sub">${[m.channel, m.duration, m.captionKind].filter(Boolean).map(esc).join(" · ")}</div>`;
 }
 
-async function summarize(videoId, { mode = "auto" } = {}) {
+function summarize(videoId, { mode = "auto" } = {}) {
   const id = extractVideoId(videoId) || videoId;
   lastVideoId = id;
   const run = ++currentRun;
   $("empty").hidden = true;
   $("meta").innerHTML = "";
   $("summary").innerHTML = "";
-  setStatus(`<span class="spin"></span> Fetching transcript…`);
+  setStatus(`<span class="spin"></span> Starting…`);
 
   let acc = "";
+  let gotMsg = false;
+  let finished = false;
+
+  let port;
   try {
-    const resp = await fetch(`${cfg.backendUrl}/summarize`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-yt-distill-token": cfg.token },
-      body: JSON.stringify({ videoId: id, mode }),
-    });
-
-    if (resp.status === 401) {
-      setStatus(`❌ Backend rejected the token. Open <a href="#" id="o1">⚙ settings</a> and paste the token the backend printed.`);
-      $("o1")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
-      return;
-    }
-    if (!resp.ok) { setStatus(`❌ Backend error ${resp.status}`); return; }
-
-    const reader = resp.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (run !== currentRun) { reader.cancel(); return; } // superseded
-      buf += dec.decode(value, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        let msg;
-        try { msg = JSON.parse(line); } catch { continue; }
-        if (msg.type === "meta") {
-          showMeta(msg);
-          setStatus(`<span class="spin"></span> Distilling…`);
-        } else if (msg.type === "delta") {
-          acc += msg.text;
-          renderMd(acc);
-        } else if (msg.type === "done") {
-          acc = msg.text || acc;
-          renderMd(acc);
-          const rl = msg.rateLimitType === "five_hour" ? "subscription" : (msg.rateLimitType || "");
-          const out = msg.usage?.output_tokens;
-          const src = msg.source === "gemini" ? " · Gemini (watched video)" : "";
-          setStatus(`✦ Distilled${out ? ` · ${out} tokens` : ""}${rl ? ` · ${rl}` : ""}${src}`);
-        } else if (msg.type === "error") {
-          if (msg.code === "NO_TRANSCRIPT") {
-            setStatus(
-              `⚠️ No transcript available for this video.` +
-              (msg.available?.length ? ` Available languages: ${esc(msg.available.slice(0, 8).join(", "))}` : "")
-            );
-          } else {
-            setStatus(`❌ ${esc(msg.message || "error")}`);
-          }
-        }
-      }
-    }
-    if (run === currentRun && !acc) setStatus(`⚠️ No output received.`);
+    port = chrome.runtime.connectNative(HOST);
   } catch (e) {
-    setStatus(
-      `❌ Can't reach the backend at <code>${esc(cfg.backendUrl)}</code>.<br>` +
-      `Start it: <code>cd backend &amp;&amp; ./start.sh</code>`
-    );
+    setStatus(`❌ Native host unavailable. Run <code>./install.sh</code> and reload the extension.`);
+    return;
+  }
+
+  port.onMessage.addListener((msg) => {
+    if (run !== currentRun) { try { port.disconnect(); } catch {} return; }
+    gotMsg = true;
+    if (msg.type === "meta") {
+      showMeta(msg);
+      setStatus(`<span class="spin"></span> Distilling…`);
+    } else if (msg.type === "delta") {
+      acc += msg.text;
+      renderMd(acc);
+    } else if (msg.type === "done") {
+      finished = true;
+      acc = msg.text || acc;
+      renderMd(acc);
+      const rl = msg.rateLimitType ? "subscription" : "";
+      const out = msg.usage?.output_tokens;
+      const src = msg.source === "gemini" ? " · Gemini (watched video)" : "";
+      setStatus(`✦ Distilled${out ? ` · ${out} tokens` : ""}${rl ? ` · ${rl}` : ""}${src}`);
+      try { port.disconnect(); } catch {}
+    } else if (msg.type === "error") {
+      finished = true;
+      if (msg.code === "NO_TRANSCRIPT") {
+        setStatus(
+          `⚠️ No captions for this video.` +
+          (msg.available?.length ? ` Languages: ${esc(msg.available.slice(0, 8).join(", "))}.` : "") +
+          ` Try <b>⟳ video</b> (needs <code>GEMINI_API_KEY</code> in .env).`
+        );
+      } else if (msg.code === "NO_GEMINI_KEY") {
+        setStatus(`⚠️ ${esc(msg.message)}`);
+      } else {
+        setStatus(`❌ ${esc(msg.message || "error")}`);
+      }
+      try { port.disconnect(); } catch {}
+    }
+  });
+
+  port.onDisconnect.addListener(() => {
+    if (run !== currentRun || finished) return;
+    const err = chrome.runtime.lastError;
+    if (err && !gotMsg) {
+      setStatus(`❌ Native host failed: ${esc(err.message || "")}.<br>Run <code>./install.sh</code>; make sure <code>claude</code> is logged in and <code>node</code> is on PATH.`);
+    } else if (!gotMsg) {
+      setStatus(`❌ Native host produced no output. Check <code>./install.sh</code> ran and dependencies are installed.`);
+    } else {
+      setStatus(`⚠️ Connection closed before finishing.`);
+    }
+  });
+
+  try {
+    port.postMessage({ type: "summarize", videoId: id, mode });
+  } catch (e) {
+    setStatus(`❌ Couldn't message native host: ${esc(e.message)}`);
   }
 }
 
 // --- wiring ---
-$("opts").addEventListener("click", () => chrome.runtime.openOptionsPage());
 $("go").addEventListener("click", () => {
   const v = extractVideoId($("url-input").value.trim());
   if (v) summarize(v);
@@ -127,9 +123,6 @@ chrome.runtime.onMessage.addListener((m) => {
 });
 
 (async function init() {
-  await loadCfg();
   const { pending } = await chrome.storage.session.get("pending");
-  if (pending?.videoId && Date.now() - pending.ts < 60_000) {
-    summarize(pending.videoId);
-  }
+  if (pending?.videoId && Date.now() - pending.ts < 60_000) summarize(pending.videoId);
 })();
