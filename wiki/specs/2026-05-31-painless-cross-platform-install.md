@@ -23,6 +23,10 @@ INSTALL (one-time)
         │                │                                                   │
         └─ Win/other ────┴─► "not supported yet (planned)" → exit 1          ▼
                                                                       install.sh  (runs in the home)
+                                          │
+                          print PLAN of every path it touches ──► confirm [y/N] via /dev/tty
+                          (--dry-run: print & exit · --yes / YT_DISTILL_YES=1: skip · --no-shim)
+                                          │ yes
         ┌──────────────┬──────────────────┬───────────────┬──────────────────┴───────────┐
         ▼              ▼                  ▼               ▼                                ▼
   npm i backend   fetch yt-dlp →    derive ext-id    write host manifest →        lightweight checks
@@ -31,7 +35,7 @@ INSTALL (one-time)
                    yt-dlp, else fail)                                                      │
                                                                                           ▼
                                                             print "Load unpacked → <home>/extension"
-                                                            install `yt-distiller` shim (update/doctor/uninstall)
+                                                            install `yt-distiller` shim → ~/.local/bin  (--no-shim to skip; never edits shell rc)
 
 RUNTIME (per distill — unchanged)
   right-click ─► background.js ─► sidePanel ─► connectNative("com.yt_distill.host")
@@ -48,16 +52,16 @@ RUNTIME (per distill — unchanged)
 
 | File | Change |
 |------|--------|
-| `bootstrap.sh` | **NEW.** curl-target. `uname` → Linux/Darwin only (else "planned" + exit 1). Downloads the branch tarball into `$YT_DISTILL_HOME` (default `$HOME/.yt-distiller`), then execs `install.sh` there. Idempotent (overwrite). |
-| `install.sh` | **REWRITE, cross-platform.** Operates on its own `ROOT`. npm-installs backend; fetches the standalone `yt-dlp` binary → `ROOT/bin` (fallback: system `yt-dlp`; else hard-fail with a one-line instruction); derives the ext-id via `tools/ext-id.mjs`; writes the host manifest into the **OS-correct** browser `NativeMessagingHosts` dirs; runs lightweight checks; prints the exact load-unpacked path; installs the `yt-distiller` CLI shim. |
+| `bootstrap.sh` | **NEW.** curl-target. `uname` → Linux/Darwin only (else "planned" + exit 1). Announces, then downloads the branch tarball into `$YT_DISTILL_HOME` (default `$HOME/.yt-distiller`), then execs `install.sh` there, **passing flags through** (`--dry-run`/`--yes`/`--no-shim`). Idempotent (overwrite). |
+| `install.sh` | **REWRITE, cross-platform.** Operates on its own `ROOT`. **First prints a full plan of every path it will touch and waits for `[y/N]` confirmation (read from `/dev/tty`)** — `--dry-run` prints the plan and exits, `--yes`/`YT_DISTILL_YES=1` skips the prompt, `--no-shim` skips the PATH shim. Runs entirely as the user (**no sudo**). Then: npm-installs backend; fetches the standalone `yt-dlp` binary → `ROOT/bin` (fallback: system `yt-dlp`; else hard-fail with a one-line instruction); derives the ext-id via `tools/ext-id.mjs`; writes the host manifest into the **OS-correct** browser `NativeMessagingHosts` dirs; runs lightweight checks; prints the exact load-unpacked path; installs the `yt-distiller` CLI shim → `~/.local/bin` (never edits shell rc — prints the PATH line if needed). |
 | `native-host-launcher.sh` | **EDIT.** Prepend `$DIR/bin` and `/opt/homebrew/bin` (Apple-Silicon Homebrew) to `PATH`; `export YT_DISTILL_YTDLP="$DIR/bin/yt-dlp"` when the bundled binary exists. |
 | `backend/lib/transcript.js` | **EDIT.** Spawn `process.env.YT_DISTILL_YTDLP || "yt-dlp"` instead of hardcoded `"yt-dlp"`; ENOENT message points at re-running the installer. |
-| `tools/yt-distiller` | **NEW.** CLI shim installed to `~/.local/bin`: `update` (re-run bootstrap), `doctor` (re-run lightweight checks + report), `uninstall` (remove host manifests + home + shim), `help`. |
+| `tools/yt-distiller` | **NEW.** CLI shim installed to `~/.local/bin`: `update` (re-run the gated installer), `doctor` (read-only checks + report), `uninstall` (lists paths, `[y/N]`, then removes host manifests + home + shim), `help`. |
 | `backend/server.js` | **DELETE.** Dead HTTP path. |
 | `start.sh` | **DELETE.** Dead HTTP launcher. |
 | `extension/util.js` | **EDIT.** Remove `DEFAULT_BACKEND`. |
 | `.env.example` | **EDIT.** Drop the HTTP-only vars (`YT_DISTILL_PORT`, `YT_DISTILL_TOKEN`); keep `GEMINI_*`, model, cookies, and the `ANTHROPIC_API_KEY` warning. |
-| `README.md` | **EDIT.** Install = the one-line curl; Linux + macOS (Windows planned); the single load-unpacked step; `yt-distiller update/doctor/uninstall`; remove all `start.sh`/token mentions. |
+| `README.md` | **EDIT.** Install = the one-line curl (note: it prints a plan and asks before changing anything; `--dry-run` to preview, `--yes` for unattended); Linux + macOS (Windows planned); the single load-unpacked step; `yt-distiller update/doctor/uninstall`; remove all `start.sh`/token mentions. |
 | `e2e/install-test.mjs` | **NEW (offline).** Drives `install.sh` against a temp `$HOME`; asserts correct manifest dir/contents, id match, idempotency, yt-dlp fallback, Windows refusal. |
 
 ## User-confirmed decisions
@@ -74,6 +78,7 @@ RUNTIME (per distill — unchanged)
 | 8 | Install verification | **Lightweight checks only** — presence of node/yt-dlp/claude, claude-login best-effort, host manifest written, **warn if `ANTHROPIC_API_KEY` is set**; no quota-spending distill |
 | 9 | Updates | **Idempotent re-run + `yt-distiller update` helper**; user reloads the unpacked extension after extension-file changes |
 | 10 | yt-dlp fetch failure | **Fall back to system `yt-dlp`** on PATH; else fail with a one-line manual-install instruction |
+| 11 | Transparency & consent | Installer **prints a full plan of every path it touches and requires `[y/N]` confirmation** before any change; `--dry-run` previews, `--yes`/`YT_DISTILL_YES=1` for unattended, `--no-shim` opts out of the PATH shim. No sudo, no system dirs, no shell-rc edits; **yt-dlp stays in the home (not on PATH)** |
 
 ## Technical decisions (Claude's call — 3 orthogonal options each)
 
@@ -106,6 +111,34 @@ Detect `uname`: `Linux` → first base, `Darwin` → second. Write `com.yt_disti
 | Chromium | `~/.config/chromium/NativeMessagingHosts/` | `~/Library/Application Support/Chromium/NativeMessagingHosts/` |
 
 Manifest `path` → `ROOT/native-host-launcher.sh` (absolute); `allowed_origins` → `chrome-extension://<derived-id>/`.
+
+## Transparency & confirmation (the install gate)
+
+`curl … | sh` is opaque by default, so the installer earns trust by **showing its hand and asking first**. Before touching anything system-level, `install.sh` prints the exact plan and waits for `[y/N]`:
+
+```
+yt-distiller installer — this will (no sudo, all under your user):
+
+  • place the project in     ~/.yt-distiller            (delete to uninstall)
+  • download yt-dlp →        ~/.yt-distiller/bin/yt-dlp (NOT added to PATH; only
+                                                         the extension's host runs it)
+  • npm install backend deps ~/.yt-distiller/backend
+  • register the browser host (each browser found):
+        ~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.yt_distill.host.json
+        ~/.config/google-chrome/…/com.yt_distill.host.json
+  • add CLI shim →           ~/.local/bin/yt-distiller  (on your PATH — skip with --no-shim)
+
+It will NOT: use sudo · write outside your home · edit your shell rc ·
+             touch ANTHROPIC_API_KEY or your Claude login.
+Network: github.com (project + yt-dlp), npm registry (deps). Nothing else.
+
+Proceed? [y/N]
+```
+
+- **Confirmation under a pipe.** Piped to `sh`, stdin *is* the script — so the prompt reads from **`/dev/tty`**. No controlling terminal (CI, nested non-tty) → it refuses to make changes and tells you to re-run with `--yes`. Silently auto-proceeding is exactly what this avoids.
+- **Flags** (passed straight through `curl … | sh -s -- <flag>`): `--dry-run` prints the plan and exits touching nothing; `--yes` / `YT_DISTILL_YES=1` proceeds unattended; `--no-shim` skips the `~/.local/bin` shim (run `~/.yt-distiller/yt-distiller` by full path instead).
+- **PATH honesty.** Only the `yt-distiller` shim lands on PATH, and only in `~/.local/bin`. **yt-dlp does not** — it lives in the isolated home, reached by the native host via `YT_DISTILL_YTDLP`. If `~/.local/bin` isn't already on PATH, the installer **prints the `export PATH=…` line for you to add** rather than editing `.bashrc`/`.zshrc` itself.
+- `yt-distiller uninstall` lists every path it will remove and asks `[y/N]` first; `yt-distiller update` re-runs this same gated installer; `yt-distiller doctor` is read-only and re-prints what's installed and where.
 
 ## The one irreducible manual step
 
@@ -143,3 +176,8 @@ Report a compact green/red checklist; never hard-fail on a login warning (login 
 10. **`yt-distiller uninstall`**: removes host manifests from all browser dirs + `~/.yt-distiller` + the shim; a subsequent `connectNative` would fail (host gone).
 11. **Runtime regression**: existing `e2e/native-host-test.mjs` still streams a distillation, now resolving yt-dlp via `YT_DISTILL_YTDLP`.
 12. **Dead-path removal**: `server.js` + `start.sh` gone; `grep DEFAULT_BACKEND extension/` empty; extension still loads and distills.
+13. **Plan then decline**: with a tty answering `n`, the installer prints the full plan and makes **no system changes** (no manifests, no shim, no yt-dlp download), nonzero exit.
+14. **Non-interactive refusal**: piped with no `/dev/tty` and no `--yes` → refuses, prints "re-run with --yes", makes no system changes.
+15. **`--dry-run`**: prints the plan and exits 0; no manifests, no yt-dlp download, no shim — verify the temp `$HOME` is untouched.
+16. **`--no-shim`**: full install minus the `~/.local/bin/yt-distiller` shim; `doctor` reachable via full path; nothing added to PATH.
+17. **No shell-rc edits**: `.bashrc`/`.zshrc`/`.profile` byte-identical before vs after install; when `~/.local/bin` isn't on PATH, the `export PATH=…` line is printed to stdout (not written to any rc).
