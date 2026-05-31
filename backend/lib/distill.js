@@ -4,6 +4,7 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { SUMMARIZER_SYSTEM, buildDistillPrompt } from "./distill-prompt.js";
+import { DistillerError } from "./errors.js";
 
 const DEFAULT_MODEL = process.env.YT_DISTILL_MODEL || "claude-sonnet-4-6";
 
@@ -75,7 +76,7 @@ export async function distill(video, { model = DEFAULT_MODEL, onText = null } = 
   }
 
   const text = (streamed || assistantText || resultText).trim();
-  if (!text && isError) throw new Error(`distillation failed: ${errorText}`);
-  if (!text) throw new Error("distillation produced no text");
+  if (!text && isError) throw new DistillerError(`distillation failed: ${errorText}`, { code: "DISTILL_FAILED" });
+  if (!text) throw new DistillerError("distillation produced no text", { code: "DISTILL_EMPTY" });
   return { text, usage, rateLimitType };
 }

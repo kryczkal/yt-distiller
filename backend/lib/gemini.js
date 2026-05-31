@@ -3,8 +3,13 @@
 // actual frames+audio. Free tier (2.5 Flash), PUBLIC videos only.
 
 import { SUMMARIZER_SYSTEM_VIDEO } from "./distill-prompt.js";
+import { DistillerError } from "./errors.js";
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
+
+// Generous cap (Gemini watches the whole video, which can legitimately take a
+// while) but not infinite — a hung request must not pin the one-shot host open.
+const GEMINI_TIMEOUT_MS = 180_000;
 
 export function geminiAvailable() {
   return Boolean(process.env.GEMINI_API_KEY);
@@ -18,7 +23,7 @@ export function geminiAvailable() {
  */
 export async function distillViaGemini(youtubeUrl, { model = process.env.GEMINI_MODEL || "gemini-2.5-flash", onText = null } = {}) {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) { const e = new Error("GEMINI_API_KEY not set"); e.code = "NO_GEMINI_KEY"; throw e; }
+  if (!key) throw new DistillerError("GEMINI_API_KEY not set", { code: "NO_GEMINI_KEY" });
 
   const body = {
     systemInstruction: { parts: [{ text: SUMMARIZER_SYSTEM_VIDEO }] },
@@ -35,17 +40,22 @@ export async function distillViaGemini(youtubeUrl, { model = process.env.GEMINI_
   const url = `${ENDPOINT}/${encodeURIComponent(model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`;
   let res;
   try {
-    res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+    });
   } catch (e) {
-    const err = new Error("Gemini request failed: " + (e.message || e)); err.code = "GEMINI_ERROR"; throw err;
+    throw new DistillerError("Gemini request failed: " + (e.message || e), { code: "GEMINI_ERROR", cause: e });
   }
 
   if (!res.ok || !res.body) {
     let detail = "";
     try { detail = (await res.json())?.error?.message || ""; } catch { try { detail = await res.text(); } catch {} }
-    const e = new Error(`Gemini HTTP ${res.status}: ${String(detail).slice(0, 300)}`);
-    e.code = res.status === 429 ? "GEMINI_RATE_LIMIT" : "GEMINI_ERROR";
-    throw e;
+    throw new DistillerError(`Gemini HTTP ${res.status}: ${String(detail).slice(0, 300)}`, {
+      code: res.status === 429 ? "GEMINI_RATE_LIMIT" : "GEMINI_ERROR",
+    });
   }
 
   const reader = res.body.getReader();
@@ -65,7 +75,7 @@ export async function distillViaGemini(youtubeUrl, { model = process.env.GEMINI_
       if (!payload || payload === "[DONE]") continue;
       let obj;
       try { obj = JSON.parse(payload); } catch { continue; }
-      if (obj?.error) { const e = new Error("Gemini: " + (obj.error.message || "error")); e.code = "GEMINI_ERROR"; throw e; }
+      if (obj?.error) throw new DistillerError("Gemini: " + (obj.error.message || "error"), { code: "GEMINI_ERROR" });
       for (const p of obj?.candidates?.[0]?.content?.parts || []) {
         if (p.text) { text += p.text; onText?.(p.text); }
       }
@@ -73,6 +83,6 @@ export async function distillViaGemini(youtubeUrl, { model = process.env.GEMINI_
   }
 
   text = text.trim();
-  if (!text) { const e = new Error("Gemini returned no text (private/unlisted video, or content filtered)"); e.code = "GEMINI_EMPTY"; throw e; }
+  if (!text) throw new DistillerError("Gemini returned no text (private/unlisted video, or content filtered)", { code: "GEMINI_EMPTY" });
   return { text, source: "gemini", model };
 }

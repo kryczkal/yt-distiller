@@ -8,7 +8,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "smoke": "node test/auth-smoke.mjs"
+    "test": "node --test test/*.test.mjs",
+    "smoke": "node test/auth-smoke.mjs",
+    "smoke:transcript": "node test/transcript-test.mjs",
+    "smoke:distill": "node test/distill-test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.158"

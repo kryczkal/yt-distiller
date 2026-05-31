@@ -16,7 +16,6 @@ const SENTINEL = "SUBSCRIPTION_OK";
 
 let assistantText = "";
 let resultText = "";
-let sawResult = false;
 let usage = null;
 
 try {
@@ -39,15 +38,15 @@ try {
       }
     }
     if (msg.type === "result") {
-      sawResult = true;
       if (typeof msg.result === "string") resultText = msg.result;
       if (msg.usage) usage = msg.usage;
     }
   }
 
   const text = (resultText || assistantText).trim();
-  const dt = ((Date.now() - 0) && 0); // placeholder, real timing below
-  console.log("\n=== assistantText:", JSON.stringify(assistantText.trim()));
+  const dt = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(`\n(ran in ${dt}s)`);
+  console.log("=== assistantText:", JSON.stringify(assistantText.trim()));
   console.log("=== resultText:   ", JSON.stringify(resultText.trim()));
   console.log("=== usage:        ", JSON.stringify(usage));
 

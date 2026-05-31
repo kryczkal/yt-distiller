@@ -5,3 +5,7 @@ node_modules/
 .DS_Store
 e2e/*.png
 **/.config/
+.env.local
+extension-key.pem
+native-host/
+wiki/
