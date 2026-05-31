@@ -12,6 +12,10 @@ const COOKIES_BROWSER =
   process.env.YT_MCP_COOKIES_FROM_BROWSER ||
   null;
 
+// The installer bundles yt-dlp into the project's bin/ and points the launcher
+// here via YT_DISTILL_YTDLP. Fall back to a yt-dlp on PATH when it isn't set.
+const YT_DLP = process.env.YT_DISTILL_YTDLP || "yt-dlp";
+
 /** Normalize a videoId or any YouTube URL into a canonical watch URL. */
 export function normalizeUrl(input) {
   if (!input) throw new Error("no video id/url");
@@ -31,7 +35,7 @@ export function extractVideoId(input) {
 
 function runYtDlp(args, { timeoutMs = 60000 } = {}) {
   return new Promise((resolve, reject) => {
-    const p = spawn("yt-dlp", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const p = spawn(YT_DLP, args, { stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     let err = "";
     const timer = setTimeout(() => {
@@ -41,7 +45,7 @@ function runYtDlp(args, { timeoutMs = 60000 } = {}) {
     p.stdout.on("data", (d) => (out += d));
     p.stderr.on("data", (d) => (err += d));
     p.on("error", (e) =>
-      reject(e.code === "ENOENT" ? new Error("yt-dlp not found on PATH") : e)
+      reject(e.code === "ENOENT" ? new Error("yt-dlp not found — re-run the yt-distiller installer, or put yt-dlp on PATH") : e)
     );
     p.on("close", (code) => {
       clearTimeout(timer);

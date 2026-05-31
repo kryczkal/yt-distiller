@@ -1,52 +1,57 @@
 #!/usr/bin/env bash
-# Install the native-messaging host so the extension can spawn the backend
-# on demand. Run once. Re-run if you move the project folder.
-set -euo pipefail
+# Install the yt-distiller native-messaging host (Linux + macOS).
+# Prints a plan of everything it touches and asks before doing anything.
+#   ./install.sh              interactive
+#   ./install.sh --dry-run    print the plan and exit, touching nothing
+#   ./install.sh --yes        proceed without the prompt (CI/unattended)
+#   ./install.sh --no-shim    don't add the ~/.local/bin/yt-distiller shim
+set -eu
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-HOST_NAME="com.yt_distill.host"
-LAUNCHER="$ROOT/native-host-launcher.sh"
+. "$ROOT/tools/lib.sh"
 
-command -v node   >/dev/null || { echo "❌ node not found on PATH"; exit 1; }
-command -v yt-dlp >/dev/null || echo "⚠️  yt-dlp not found — needed for transcripts."
-command -v claude >/dev/null || echo "⚠️  'claude' CLI not found — needed for subscription auth (Claude Code, logged in)."
+ASSUME_YES=0; DRY_RUN=0; NO_SHIM=0
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes)   ASSUME_YES=1 ;;
+    --dry-run)  DRY_RUN=1 ;;
+    --no-shim)  NO_SHIM=1 ;;
+    -h|--help)  echo "usage: install.sh [--yes] [--dry-run] [--no-shim]"; exit 0 ;;
+    *) echo "unknown flag: $arg (try --help)" >&2; exit 2 ;;
+  esac
+done
+[ "${YT_DISTILL_YES:-0}" = "1" ] && ASSUME_YES=1
+export ASSUME_YES NO_SHIM
 
-chmod +x "$LAUNCHER" "$ROOT/backend/native-host.mjs" 2>/dev/null || true
-[ -d "$ROOT/backend/node_modules" ] || { echo "Installing backend deps…"; npm install --prefix "$ROOT/backend"; }
+case "$(os_kind)" in
+  linux|macos) ;;
+  *) echo "Windows isn't supported yet (planned). See the README." >&2; exit 1 ;;
+esac
+
+command -v node >/dev/null 2>&1 || { echo "✗ node ≥20 is required — https://nodejs.org" >&2; exit 1; }
+command -v curl >/dev/null 2>&1 || { echo "✗ curl is required" >&2; exit 1; }
 
 EXT_ID="$(node "$ROOT/tools/ext-id.mjs")"
-echo "Extension id (pinned): $EXT_ID"
 
-MANIFEST_JSON="$(cat <<EOF
-{
-  "name": "$HOST_NAME",
-  "description": "YouTube Distiller native host",
-  "path": "$LAUNCHER",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://$EXT_ID/"]
-}
-EOF
-)"
+print_plan "$ROOT" "$EXT_ID"
+if [ "$DRY_RUN" = "1" ]; then echo "(dry run — nothing changed)"; exit 0; fi
+confirm || { echo "Aborted — nothing changed."; exit 1; }
 
-installed=0
-for dir in \
-  "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts" \
-  "$HOME/.config/google-chrome/NativeMessagingHosts" \
-  "$HOME/.config/chromium/NativeMessagingHosts"; do
-  parent="$(dirname "$dir")"
-  if [ -d "$parent" ]; then
-    mkdir -p "$dir"
-    printf '%s\n' "$MANIFEST_JSON" > "$dir/$HOST_NAME.json"
-    echo "installed → $dir/$HOST_NAME.json"
-    installed=$((installed + 1))
-  fi
-done
-
-if [ "$installed" -eq 0 ]; then
-  echo "⚠️  No Brave/Chrome/Chromium profile dir found under ~/.config. Open the browser once, then re-run ./install.sh."
-  exit 1
+echo "→ installing…"
+chmod +x "$ROOT/native-host-launcher.sh" "$ROOT/tools/yt-distiller" 2>/dev/null || true
+if [ ! -d "$ROOT/backend/node_modules" ]; then
+  echo "  npm install (backend)…"
+  ( cd "$ROOT/backend" && npm install --silent )
 fi
+fetch_ytdlp "$ROOT" || true
+write_manifests "$ROOT" "$EXT_ID"
+install_shim "$ROOT"
 
 echo
-echo "✅ Native host installed for $installed browser(s)."
-echo "Next: load the unpacked extension (extension/ folder). It will have id $EXT_ID."
-echo "Optional Gemini fallback: cp .env.example .env  and add GEMINI_API_KEY."
+yt_doctor "$ROOT" || true
+echo
+cat <<EOF
+✅ Host installed. Last step (once):
+   1. open  brave://extensions   → enable Developer mode
+   2. "Load unpacked" → select:  $ROOT/extension
+   3. verify any time:  yt-distiller doctor
+EOF

@@ -10,13 +10,18 @@ Distillation, not a summary — facts, numbers, and names stay; filler goes. `yt
 
 ## Install
 
-Node ≥ 20, `yt-dlp` on PATH, Claude Code logged in (Pro/Max).
+**Linux or macOS** · Node ≥ 20 · Claude Code logged in (Pro/Max). One line:
 
 ```bash
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/kryczkal/yt-distiller/main/bootstrap.sh | sh
 ```
 
-Load `extension/` unpacked at `brave://extensions` (Developer mode on).
+It prints a plan of everything it touches and asks before doing anything — preview with `… | sh -s -- --dry-run`, skip the prompt with `--yes`. Bundles `yt-dlp` and registers the native host; no sudo, and nothing lands on your `$PATH` except a `yt-distiller` helper. Then, once:
+
+1. `brave://extensions` → **Developer mode** on
+2. **Load unpacked** → `~/.yt-distiller/extension`
+
+Manage it later: `yt-distiller doctor` · `yt-distiller update` · `yt-distiller uninstall`. *(Windows: not yet.)*
 
 ## Use
 

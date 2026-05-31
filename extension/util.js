@@ -14,5 +14,3 @@ export function extractVideoId(input) {
 export function watchUrl(id) {
   return `https://www.youtube.com/watch?v=${id}`;
 }
-
-export const DEFAULT_BACKEND = "http://127.0.0.1:8765";

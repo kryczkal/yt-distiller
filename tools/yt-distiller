@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# yt-distiller CLI — installed as a symlink in ~/.local/bin by install.sh.
+# Resolves its own real location (following the symlink) to find the project home.
+set -eu
+
+SOURCE="${BASH_SOURCE[0]:-$0}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  case "$SOURCE" in /*) ;; *) SOURCE="$DIR/$SOURCE" ;; esac
+done
+SELF_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+ROOT="$(cd "$SELF_DIR/.." && pwd)"
+. "$ROOT/tools/lib.sh"
+
+cmd="${1:-help}"; [ "$#" -gt 0 ] && shift || true
+ASSUME_YES="${ASSUME_YES:-0}"; NO_SHIM="${NO_SHIM:-0}"
+for a in "$@"; do case "$a" in -y|--yes) ASSUME_YES=1 ;; esac; done
+export ASSUME_YES NO_SHIM
+
+case "$cmd" in
+  doctor)    yt_doctor "$ROOT" ;;
+  uninstall) do_uninstall "$ROOT" ;;
+  update)
+    echo "Updating yt-distiller (re-downloading latest)…"
+    curl -fsSL "https://raw.githubusercontent.com/$REPO_SLUG/main/bootstrap.sh" | sh -s -- "$@"
+    ;;
+  help|-h|--help)
+    cat <<'EOF'
+yt-distiller — local YouTube distiller host
+
+  yt-distiller doctor      check node / yt-dlp / claude / host registration
+  yt-distiller update      re-download + reinstall the latest version
+  yt-distiller uninstall   remove host manifests, the project home, and this shim
+
+After an update that changed the extension, reload it at brave://extensions.
+EOF
+    ;;
+  *) echo "unknown command: $cmd (try: yt-distiller help)" >&2; exit 2 ;;
+esac
