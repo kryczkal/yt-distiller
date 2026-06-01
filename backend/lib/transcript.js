@@ -1,13 +1,14 @@
-// Transcript extraction — a faithful Node port of the user's proven yt-mcp recipe:
+// Transcript extraction recipe (originally the standalone yt-mcp, now folded in):
 //   yt-dlp -J (info + caption-track maps) -> prefer manual lang, then auto lang,
 //   then lang.* prefixes -> pick json3 (clean) then vtt -> fetch track URL directly.
-// Runs from the user's residential IP (the single biggest reliability factor for
-// YouTube transcripts; datacenter IPs get blocked, local does not).
+// Runs from your local/residential IP, which is the single biggest reliability
+// factor for YouTube transcripts: datacenter IPs get blocked, residential don't.
 
 import { spawn } from "node:child_process";
 import { DistillerError } from "./errors.js";
 
-// Reuse the user's existing cookie env if set; allow a backend-specific override.
+// Honor the project's cookie env (YT_DISTILL_*), falling back to the legacy
+// yt-mcp variable name so older setups keep working.
 const COOKIES_BROWSER =
   process.env.YT_DISTILL_COOKIES_FROM_BROWSER ||
   process.env.YT_MCP_COOKIES_FROM_BROWSER ||

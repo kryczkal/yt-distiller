@@ -1,13 +1,13 @@
 // The distillation prompt — the brain of the whole tool.
 //
-// Design = synthesis of three skills the user pointed at:
-//   /distill      -> strip scaffolding, keep load-bearing facts, mechanism > outcome, no meta
-//   /explain      -> LOSSLESS: never omit a fact/number/name/edge-case; first-principles; precise
-//   /tight-prose  -> every sentence is fact/reason/connector; causality on the surface;
-//                    prose over fragmented bullets; numbers inside sentences; reader ends with
-//                    a clearer mental model
+// Design = a synthesis of three principles held in tension:
+//   distillation -> strip scaffolding, keep load-bearing facts, mechanism > outcome, no meta
+//   losslessness -> never omit a fact/number/name/edge-case; first-principles; precise
+//   tight prose  -> every sentence is fact/reason/connector; causality on the surface;
+//                   prose over fragmented bullets; numbers inside sentences; reader ends with
+//                   a clearer mental model
 //
-// The contradiction (distill compresses, explain refuses to omit) resolves the way the user framed it:
+// The contradiction (distillation compresses, losslessness refuses to omit) resolves as:
 //   COMPRESS THE DELIVERY, NEVER THE KNOWLEDGE.
 // A spoken transcript is mostly scaffolding (sponsor reads, "subscribe", filler, repetition).
 // Strip all of that. The information underneath is sacred — keep every bit of it.
