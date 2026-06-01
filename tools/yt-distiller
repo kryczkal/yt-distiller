@@ -21,6 +21,14 @@ export ASSUME_YES NO_SHIM
 case "$cmd" in
   doctor)    yt_doctor "$ROOT" ;;
   uninstall) do_uninstall "$ROOT" ;;
+  mcp)
+    sub="${1:-install}"
+    case "$sub" in
+      install|add|register) register_mcp "$ROOT" ;;
+      uninstall|remove)     unregister_mcp "$ROOT" ;;
+      *) echo "usage: yt-distiller mcp [install|uninstall]" >&2; exit 2 ;;
+    esac
+    ;;
   update)
     echo "Updating yt-distiller (re-downloading latest)…"
     curl -fsSL "https://raw.githubusercontent.com/$REPO_SLUG/main/bootstrap.sh" | sh -s -- "$@"
@@ -29,9 +37,10 @@ case "$cmd" in
     cat <<'EOF'
 yt-distiller — local YouTube distiller host
 
-  yt-distiller doctor      check node / yt-dlp / claude / host registration
+  yt-distiller doctor      check node / yt-dlp / claude / host + MCP registration
+  yt-distiller mcp         register the MCP server with Claude (mcp uninstall to remove)
   yt-distiller update      re-download + reinstall the latest version
-  yt-distiller uninstall   remove host manifests, the project home, and this shim
+  yt-distiller uninstall   remove host manifests, MCP registration, project home, shim
 
 After an update that changed the extension, reload it at brave://extensions.
 EOF

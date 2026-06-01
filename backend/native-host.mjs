@@ -16,9 +16,8 @@ for (const p of [path.join(import.meta.dirname, "..", ".env"), path.join(import.
 // Subscription auth only — never let a stray API key bill per-token.
 delete process.env.ANTHROPIC_API_KEY;
 
-const { getTranscript, fetchVideoInfo, normalizeUrl } = await import("./lib/transcript.js");
-const { distill } = await import("./lib/distill.js");
-const { distillViaGemini, geminiAvailable } = await import("./lib/gemini.js");
+const { orchestrate } = await import("./lib/orchestrate.js");
+const { geminiAvailable } = await import("./lib/gemini.js");
 
 // ---- native-messaging framing ----
 function send(obj) {
@@ -76,35 +75,17 @@ async function summarize(msg) {
   const mode = msg.mode === "video" ? "video" : "auto";
   const lang = typeof msg.lang === "string" && /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(msg.lang) ? msg.lang : "en";
   const model = typeof msg.model === "string" && msg.model.trim() ? msg.model.trim() : undefined;
-  const watchUrl = normalizeUrl(input);
 
-  // Forced visual path (the "⟳ video" button).
-  if (mode === "video") {
-    if (!geminiAvailable()) { send({ type: "error", code: "NO_GEMINI_KEY", message: "Set GEMINI_API_KEY in .env to use the video path." }); return; }
-    let meta = {};
-    try { const i = await fetchVideoInfo(input); meta = { id: i.id, title: i.title, channel: i.channel || i.uploader, duration: i.duration_string }; } catch {}
-    send({ type: "meta", ...meta, captionKind: "Gemini (watching video)", url: watchUrl });
-    const r = await distillViaGemini(watchUrl, { onText: (c) => send({ type: "delta", text: c }) });
-    send({ type: "done", text: r.text, source: "gemini" });
-    return;
-  }
-
-  // Default: transcript → Claude, auto-escalate to Gemini on no captions.
-  let video;
-  try {
-    video = await getTranscript(input, { lang });
-  } catch (e) {
-    if (e.code === "NO_TRANSCRIPT" && geminiAvailable()) {
-      send({ type: "meta", id: e.meta?.id, title: e.meta?.title, channel: e.meta?.channel, duration: e.meta?.duration, captionKind: "no captions → Gemini video", url: e.meta?.url || watchUrl });
-      const r = await distillViaGemini(e.meta?.url || watchUrl, { onText: (c) => send({ type: "delta", text: c }) });
-      send({ type: "done", text: r.text, source: "gemini" });
-      return;
-    }
-    send({ type: "error", code: e.code || "ERROR", message: e.message || String(e), available: e.available });
-    return;
-  }
-
-  send({ type: "meta", id: video.id, title: video.title, channel: video.channel, duration: video.duration, captionKind: video.captionKind, url: video.url });
-  const { text, usage, rateLimitType } = await distill(video, { model, onText: (c) => send({ type: "delta", text: c }) });
-  send({ type: "done", text, usage, rateLimitType, source: "claude" });
+  // The browser always wants the finished brief (distillMode:"full"). Failures
+  // (NO_GEMINI_KEY, NO_TRANSCRIPT, etc.) throw and are reported by dispatch().
+  const r = await orchestrate({
+    url: input,
+    lang,
+    mode,
+    model,
+    distillMode: "full",
+    onMeta: (m) => send({ type: "meta", ...m }),
+    onText: (c) => send({ type: "delta", text: c }),
+  });
+  send({ type: "done", text: r.text, usage: r.usage, rateLimitType: r.rateLimitType, source: r.source });
 }

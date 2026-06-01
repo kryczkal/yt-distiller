@@ -5,22 +5,26 @@
 #   ./install.sh --dry-run    print the plan and exit, touching nothing
 #   ./install.sh --yes        proceed without the prompt (CI/unattended)
 #   ./install.sh --no-shim    don't add the ~/.local/bin/yt-distiller shim
+#   ./install.sh --with-mcp   also register the MCP server with Claude (else: prompted)
+#   ./install.sh --no-mcp     don't offer the MCP server at all
 set -eu
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 . "$ROOT/tools/lib.sh"
 
-ASSUME_YES=0; DRY_RUN=0; NO_SHIM=0
+ASSUME_YES=0; DRY_RUN=0; NO_SHIM=0; WITH_MCP=0; NO_MCP=0
 for arg in "$@"; do
   case "$arg" in
     -y|--yes)   ASSUME_YES=1 ;;
     --dry-run)  DRY_RUN=1 ;;
     --no-shim)  NO_SHIM=1 ;;
-    -h|--help)  echo "usage: install.sh [--yes] [--dry-run] [--no-shim]"; exit 0 ;;
+    --with-mcp) WITH_MCP=1 ;;
+    --no-mcp)   NO_MCP=1 ;;
+    -h|--help)  echo "usage: install.sh [--yes] [--dry-run] [--no-shim] [--with-mcp|--no-mcp]"; exit 0 ;;
     *) echo "unknown flag: $arg (try --help)" >&2; exit 2 ;;
   esac
 done
 [ "${YT_DISTILL_YES:-0}" = "1" ] && ASSUME_YES=1
-export ASSUME_YES NO_SHIM
+export ASSUME_YES NO_SHIM WITH_MCP NO_MCP
 
 case "$(os_kind)" in
   linux|macos) ;;
@@ -45,6 +49,17 @@ fi
 fetch_ytdlp "$ROOT" || true
 write_manifests "$ROOT" "$EXT_ID"
 install_shim "$ROOT"
+
+# MCP server — opt-in. --with-mcp registers it; --no-mcp skips silently;
+# otherwise offer it interactively (default no, and --yes does NOT auto-accept).
+chmod +x "$ROOT/mcp-launcher.sh" 2>/dev/null || true
+if [ "$WITH_MCP" = "1" ]; then
+  register_mcp "$ROOT" || true
+elif [ "$NO_MCP" = "1" ]; then
+  :
+elif ask_yn "Also register the MCP server with Claude (use yt-distiller from Claude Code/Desktop)?"; then
+  register_mcp "$ROOT" || true
+fi
 
 echo
 yt_doctor "$ROOT" || true

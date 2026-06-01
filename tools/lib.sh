@@ -3,6 +3,7 @@
 
 HOST_NAME="com.yt_distill.host"
 REPO_SLUG="kryczkal/yt-distiller"
+MCP_CLIENT_NAME="yt-distiller"   # name the MCP server registers under with Claude
 
 yt_home() { printf '%s\n' "${YT_DISTILL_HOME:-$HOME/.yt-distiller}"; }
 
@@ -124,6 +125,53 @@ install_shim() {
   esac
 }
 
+# ---- MCP server (the second transport — Claude Code/Desktop, any MCP client) ----
+
+mcp_manual_hint() {
+  launcher="$1"
+  cat >&2 <<EOF
+    • Claude Code:    claude mcp add --scope user $MCP_CLIENT_NAME -- "$launcher"
+    • Claude Desktop: add under "mcpServers" in claude_desktop_config.json:
+        "$MCP_CLIENT_NAME": { "command": "$launcher" }
+EOF
+}
+
+# True if the MCP server is registered with the Claude CLI (user scope).
+mcp_registered() {
+  command -v claude >/dev/null 2>&1 || return 1
+  claude mcp list 2>/dev/null | grep -q "^${MCP_CLIENT_NAME}\b" || claude mcp list 2>/dev/null | grep -q "^${MCP_CLIENT_NAME}:"
+}
+
+# Register the MCP server with Claude (user scope). Prefers the claude CLI;
+# otherwise prints a manual snippet. Idempotent. $1 = project root.
+register_mcp() {
+  root="$1"; launcher="$root/mcp-launcher.sh"
+  chmod +x "$launcher" 2>/dev/null || true
+  if command -v claude >/dev/null 2>&1; then
+    claude mcp remove --scope user "$MCP_CLIENT_NAME" >/dev/null 2>&1 || true
+    if claude mcp add --scope user "$MCP_CLIENT_NAME" -- "$launcher" >/dev/null 2>&1; then
+      echo "  mcp: registered with Claude Code (user scope) as '$MCP_CLIENT_NAME'"
+      echo "       (for Claude Desktop, add it manually — see: yt-distiller mcp)"
+      return 0
+    fi
+    echo "  mcp: 'claude mcp add' failed — add it manually:" >&2
+  else
+    echo "  mcp: claude CLI not found — add it manually:" >&2
+  fi
+  mcp_manual_hint "$launcher"
+  return 1
+}
+
+# Remove the MCP registration (best-effort). $1 = project root (for the hint).
+unregister_mcp() {
+  root="${1:-$(yt_home)}"
+  if command -v claude >/dev/null 2>&1 && mcp_registered; then
+    if claude mcp remove --scope user "$MCP_CLIENT_NAME" >/dev/null 2>&1; then
+      echo "  mcp: unregistered from Claude Code"
+    fi
+  fi
+}
+
 print_plan() {
   root="$1"; ext_id="$2"
   echo "yt-distiller installer — this will (no sudo, all under your user):"
@@ -137,6 +185,13 @@ print_plan() {
     echo "  • CLI shim:                skipped (--no-shim)"
   else
     echo "  • add CLI shim ->          $HOME/.local/bin/yt-distiller   (on your PATH)"
+  fi
+  if [ "${WITH_MCP:-0}" = "1" ]; then
+    echo "  • register MCP server      with Claude (user scope) as '$MCP_CLIENT_NAME' (--with-mcp)"
+  elif [ "${NO_MCP:-0}" = "1" ]; then
+    echo "  • MCP server:              skipped (--no-mcp)"
+  else
+    echo "  • MCP server:              offered after install (opt-in; use it from Claude Code/Desktop)"
   fi
   echo
   echo "It will NOT: use sudo · write outside your home · edit your shell rc ·"
@@ -156,6 +211,19 @@ confirm() {
   fi
   echo "No terminal available for confirmation. Re-run with --yes (or set YT_DISTILL_YES=1)." >&2
   exit 1
+}
+
+# Yes/no prompt for OPT-IN steps (default no). Unlike confirm(), --yes does NOT
+# auto-accept (opt-in features stay off unless explicitly requested), and a
+# missing terminal is a silent "no" rather than a hard error. $1 = prompt.
+ask_yn() {
+  if [ "${YT_DISTILL_NO_TTY:-0}" != "1" ] && { exec 3</dev/tty; } 2>/dev/null; then
+    printf '%s [y/N] ' "$1" >/dev/tty
+    IFS= read -r _ans <&3 || _ans=""
+    exec 3<&- 2>/dev/null || true
+    case "$_ans" in [yY]|[yY][eE][sS]) return 0 ;; *) return 1 ;; esac
+  fi
+  return 1
 }
 
 yt_doctor() {
@@ -188,6 +256,11 @@ $(nmh_dirs)
 EOF
   if [ "$found" -gt 0 ]; then echo "  ✓ native host registered ($found browser(s))"
   else echo "  ✗ native host not registered — run the installer"; rc=1; fi
+  if mcp_registered; then
+    echo "  ✓ MCP server registered with Claude ('$MCP_CLIENT_NAME')"
+  else
+    echo "  • MCP server not registered (optional — run: yt-distiller mcp install)"
+  fi
   return $rc
 }
 
@@ -200,9 +273,11 @@ do_uninstall() {
 $(nmh_dirs)
 EOF
   if [ -L "$HOME/.local/bin/yt-distiller" ] || [ -f "$HOME/.local/bin/yt-distiller" ]; then echo "  $HOME/.local/bin/yt-distiller"; fi
+  if mcp_registered; then echo "  MCP registration with Claude ('$MCP_CLIENT_NAME')"; fi
   if [ -d "$home" ]; then echo "  $home  (whole directory)"; fi
   echo
   confirm || { echo "Aborted — nothing removed."; return 1; }
+  unregister_mcp "$root"
   while IFS= read -r d; do rm -f "$d/$HOST_NAME.json"; done <<EOF
 $(nmh_dirs)
 EOF

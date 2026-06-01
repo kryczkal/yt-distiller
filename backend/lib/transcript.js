@@ -78,6 +78,15 @@ export async function fetchVideoInfo(url) {
   return JSON.parse(out);
 }
 
+/** Available subtitle languages for a video: { manual, auto } (parity with yt-mcp). */
+export async function listLanguages(input) {
+  const info = await fetchVideoInfo(input);
+  return {
+    manual: Object.keys(info.subtitles || {}).sort(),
+    auto: Object.keys(info.automatic_captions || {}).sort(),
+  };
+}
+
 export function pickTrack(info, lang) {
   const subs = info.subtitles || {};
   const auto = info.automatic_captions || {};
