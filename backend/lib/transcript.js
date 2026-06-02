@@ -43,16 +43,32 @@ export function extractVideoId(input) {
 function runYtDlp(args, { timeoutMs = 60000 } = {}) {
   return new Promise((resolve, reject) => {
     const p = spawn(YT_DLP, args, { stdio: ["ignore", "pipe", "pipe"] });
+    // Decode through the stream's own StringDecoder: a multibyte UTF-8 character
+    // (common in non-English titles/channels) split across two 'data' chunks must
+    // not be corrupted — `chunk.toString()` per event would mangle the boundary.
+    p.stdout.setEncoding("utf8");
+    p.stderr.setEncoding("utf8");
     let out = "";
     let err = "";
+    // Settle exactly once and always clear the timer — including on 'error', where
+    // 'close' may never fire and would otherwise leak the timer (pinning the
+    // one-shot host's event loop open for the full timeout).
+    let settled = false;
+    const settle = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(arg);
+    };
     const timer = setTimeout(() => {
       p.kill("SIGKILL");
-      reject(new DistillerError("yt-dlp timed out", { code: "YTDLP_TIMEOUT" }));
+      settle(reject, new DistillerError("yt-dlp timed out", { code: "YTDLP_TIMEOUT" }));
     }, timeoutMs);
     p.stdout.on("data", (d) => (out += d));
     p.stderr.on("data", (d) => (err += d));
     p.on("error", (e) =>
-      reject(
+      settle(
+        reject,
         e.code === "ENOENT"
           ? new DistillerError(
               "yt-dlp not found — re-run the yt-distiller installer, or put yt-dlp on PATH",
@@ -62,10 +78,9 @@ function runYtDlp(args, { timeoutMs = 60000 } = {}) {
       )
     );
     p.on("close", (code) => {
-      clearTimeout(timer);
       code === 0
-        ? resolve(out)
-        : reject(new DistillerError(`yt-dlp exited ${code}: ${err.slice(-600).trim()}`, { code: "YTDLP_FAILED" }));
+        ? settle(resolve, out)
+        : settle(reject, new DistillerError(`yt-dlp exited ${code}: ${err.slice(-600).trim()}`, { code: "YTDLP_FAILED" }));
     });
   });
 }
@@ -76,7 +91,13 @@ export async function fetchVideoInfo(url) {
   if (COOKIES_BROWSER) args.push("--cookies-from-browser", COOKIES_BROWSER);
   args.push(normalizeUrl(url));
   const out = await runYtDlp(args);
-  return JSON.parse(out);
+  try {
+    return JSON.parse(out);
+  } catch (e) {
+    // Keep the trust boundary coded: a malformed -J payload is a DistillerError,
+    // not a bare SyntaxError the transports don't know how to report.
+    throw new DistillerError("yt-dlp returned malformed JSON", { code: "YTDLP_BAD_JSON", cause: e });
+  }
 }
 
 /** Available subtitle languages for a video: { manual, auto } (parity with yt-mcp). */
@@ -134,6 +155,25 @@ export function parseVtt(raw) {
   return dedup.join(" ").replace(/\s+/g, " ").trim();
 }
 
+/** Human label for a video's duration: yt-dlp's formatted string, else seconds. */
+export function durationLabel(info) {
+  return info.duration_string || (info.duration ? `${info.duration}s` : null);
+}
+
+/**
+ * The core video metadata both surfaces derive from yt-dlp's -J info — the single
+ * place that shapes it, so the transcript and Gemini-video paths can never drift.
+ */
+export function baseMetaFromInfo(info) {
+  return {
+    id: info.id,
+    title: info.title,
+    channel: info.channel || info.uploader || null,
+    duration: durationLabel(info),
+    durationSec: info.duration ?? null,
+  };
+}
+
 /**
  * Fetch a video's metadata + flattened transcript text.
  * @returns {Promise<{id,title,channel,duration,durationSec,url,transcript,captionKind,lang}>}
@@ -142,11 +182,7 @@ export function parseVtt(raw) {
 export async function getTranscript(input, { lang = "en" } = {}) {
   const info = await fetchVideoInfo(input);
   const meta = {
-    id: info.id,
-    title: info.title,
-    channel: info.channel || info.uploader || null,
-    duration: info.duration_string || (info.duration ? `${info.duration}s` : null),
-    durationSec: info.duration ?? null,
+    ...baseMetaFromInfo(info),
     url: info.webpage_url || normalizeUrl(input),
   };
 
@@ -167,6 +203,11 @@ export async function getTranscript(input, { lang = "en" } = {}) {
   }
 
   const fmt = pickFormat(track.formats);
+  if (!fmt?.url) {
+    // A matched track with no fetchable format is, for our purposes, no transcript
+    // — route it through the same coded path (so the panel can offer the Gemini fallback).
+    throw new DistillerError("caption track has no fetchable format", { code: "NO_TRANSCRIPT", meta });
+  }
   const res = await fetch(fmt.url, {
     headers: { "user-agent": "Mozilla/5.0" },
     signal: AbortSignal.timeout(CAPTION_FETCH_TIMEOUT_MS),

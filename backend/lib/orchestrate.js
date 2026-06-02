@@ -12,7 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { getTranscript, fetchVideoInfo, normalizeUrl } from "./transcript.js";
+import { getTranscript, fetchVideoInfo, normalizeUrl, baseMetaFromInfo } from "./transcript.js";
 import { distill } from "./distill.js";
 import { distillViaGemini, geminiAvailable } from "./gemini.js";
 import { SUMMARIZER_SYSTEM, buildDistillPrompt } from "./distill-prompt.js";
@@ -74,7 +74,7 @@ export async function orchestrate({
     let meta = { url: watchUrl, captionKind: "Gemini (watching video)" };
     try {
       const i = await fetchVideoInfo(input);
-      meta = { ...meta, id: i.id, title: i.title, channel: i.channel || i.uploader, duration: i.duration_string };
+      meta = { ...meta, ...baseMetaFromInfo(i) };
     } catch {
       /* metadata is best-effort; the visual distill still works without it */
     }

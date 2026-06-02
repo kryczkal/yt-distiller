@@ -13,6 +13,8 @@ import {
   pickFormat,
   parseJson3,
   parseVtt,
+  durationLabel,
+  baseMetaFromInfo,
 } from "../lib/transcript.js";
 import { buildDistillPrompt } from "../lib/distill-prompt.js";
 import { DistillerError } from "../lib/errors.js";
@@ -158,4 +160,26 @@ test("buildDistillPrompt — omits absent metadata fields cleanly", () => {
   assert.doesNotMatch(out, /Title:/);
   assert.doesNotMatch(out, /Channel:/);
   assert.match(out, /only body/);
+});
+
+test("durationLabel — prefers the formatted string", () => {
+  assert.equal(durationLabel({ duration_string: "1:23", duration: 83 }), "1:23");
+});
+
+test("durationLabel — falls back to seconds, then null", () => {
+  // The fallback the Gemini-video path previously dropped — assert both surfaces agree.
+  assert.equal(durationLabel({ duration: 83 }), "83s");
+  assert.equal(durationLabel({}), null);
+});
+
+test("baseMetaFromInfo — shapes the shared metadata once for both surfaces", () => {
+  assert.deepEqual(
+    baseMetaFromInfo({ id: "abc12345678", title: "T", channel: "C", duration_string: "1:23", duration: 83 }),
+    { id: "abc12345678", title: "T", channel: "C", duration: "1:23", durationSec: 83 }
+  );
+});
+
+test("baseMetaFromInfo — channel falls back to uploader, then null", () => {
+  assert.equal(baseMetaFromInfo({ uploader: "U" }).channel, "U");
+  assert.equal(baseMetaFromInfo({}).channel, null);
 });

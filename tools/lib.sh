@@ -162,9 +162,8 @@ register_mcp() {
   return 1
 }
 
-# Remove the MCP registration (best-effort). $1 = project root (for the hint).
+# Remove the MCP registration (best-effort). Ignores any args.
 unregister_mcp() {
-  root="${1:-$(yt_home)}"
   if command -v claude >/dev/null 2>&1 && mcp_registered; then
     if claude mcp remove --scope user "$MCP_CLIENT_NAME" >/dev/null 2>&1; then
       echo "  mcp: unregistered from Claude Code"
