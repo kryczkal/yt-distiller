@@ -6,17 +6,7 @@
 
 import { spawn } from "node:child_process";
 import { DistillerError } from "./errors.js";
-
-// Honor the project's cookie env (YT_DISTILL_*), falling back to the legacy
-// yt-mcp variable name so older setups keep working.
-const COOKIES_BROWSER =
-  process.env.YT_DISTILL_COOKIES_FROM_BROWSER ||
-  process.env.YT_MCP_COOKIES_FROM_BROWSER ||
-  null;
-
-// The installer bundles yt-dlp into the project's bin/ and points the launcher
-// here via YT_DISTILL_YTDLP. Fall back to a yt-dlp on PATH when it isn't set.
-const YT_DLP = process.env.YT_DISTILL_YTDLP || "yt-dlp";
+import { config } from "./config.js";
 
 // Caption files are small static downloads; cap them so a stalled fetch can't
 // hang the one-shot native host forever (yt-dlp itself already has a timeout).
@@ -42,7 +32,7 @@ export function extractVideoId(input) {
 
 function runYtDlp(args, { timeoutMs = 60000 } = {}) {
   return new Promise((resolve, reject) => {
-    const p = spawn(YT_DLP, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const p = spawn(config.ytdlpPath, args, { stdio: ["ignore", "pipe", "pipe"] });
     // Decode through the stream's own StringDecoder: a multibyte UTF-8 character
     // (common in non-English titles/channels) split across two 'data' chunks must
     // not be corrupted — `chunk.toString()` per event would mangle the boundary.
@@ -88,7 +78,7 @@ function runYtDlp(args, { timeoutMs = 60000 } = {}) {
 /** yt-dlp -J: full info json including subtitles / automatic_captions / metadata. */
 export async function fetchVideoInfo(url) {
   const args = ["-J", "--skip-download", "--no-warnings", "--no-progress"];
-  if (COOKIES_BROWSER) args.push("--cookies-from-browser", COOKIES_BROWSER);
+  if (config.cookiesBrowser) args.push("--cookies-from-browser", config.cookiesBrowser);
   args.push(normalizeUrl(url));
   const out = await runYtDlp(args);
   try {

@@ -17,6 +17,15 @@ let lastMarkdown = "";
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// Defense in depth: the brief is model output, and renderMd() sinks marked's
+// output into innerHTML. marked passes raw HTML through verbatim, and a video
+// transcript can prompt-inject the model into emitting HTML — so render any raw
+// HTML (block or inline) as inert text, never live markup. marked already drops
+// javascript: URLs on links/images; this closes the last sink (<img> beacons,
+// <iframe>, etc.). The distill contract is Markdown-only, so this never touches
+// legitimate output.
+marked.use({ renderer: { html: ({ text }) => esc(text) } });
+
 // Inline SVG (Lucide-style strokes) — no emoji as functional iconography.
 const ICON = {
   spark: '<svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7z"/></svg>',

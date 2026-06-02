@@ -4,6 +4,7 @@
 
 import { SUMMARIZER_SYSTEM_VIDEO } from "./distill-prompt.js";
 import { DistillerError } from "./errors.js";
+import { config } from "./config.js";
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -12,7 +13,7 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 const GEMINI_TIMEOUT_MS = 180_000;
 
 export function geminiAvailable() {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return Boolean(config.geminiApiKey);
 }
 
 /**
@@ -21,8 +22,8 @@ export function geminiAvailable() {
  * @param {{model?:string, onText?:(s:string)=>void}} [opts]
  * @returns {Promise<{text:string, source:"gemini", model:string}>}
  */
-export async function distillViaGemini(youtubeUrl, { model = process.env.GEMINI_MODEL || "gemini-2.5-flash", onText = null } = {}) {
-  const key = process.env.GEMINI_API_KEY;
+export async function distillViaGemini(youtubeUrl, { model = config.geminiModel, onText = null } = {}) {
+  const key = config.geminiApiKey;
   if (!key) throw new DistillerError("GEMINI_API_KEY not set", { code: "NO_GEMINI_KEY" });
 
   const body = {
@@ -37,12 +38,14 @@ export async function distillViaGemini(youtubeUrl, { model = process.env.GEMINI_
     generationConfig: { temperature: 0.3 },
   };
 
-  const url = `${ENDPOINT}/${encodeURIComponent(model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`;
+  // Pass the key as a header, not a ?key= query param: URLs leak into logs,
+  // proxies, and error messages, whereas the header doesn't.
+  const url = `${ENDPOINT}/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`;
   let res;
   try {
     res = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });

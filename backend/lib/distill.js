@@ -5,8 +5,7 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { SUMMARIZER_SYSTEM, buildDistillPrompt } from "./distill-prompt.js";
 import { DistillerError } from "./errors.js";
-
-const DEFAULT_MODEL = process.env.YT_DISTILL_MODEL || "claude-sonnet-4-6";
+import { config } from "./config.js";
 
 // Strip ANTHROPIC_API_KEY from the child env: it outranks the subscription
 // OAuth token in the SDK's auth precedence, so a stray key = silent API billing.
@@ -21,7 +20,7 @@ function cleanEnv() {
  * @param {{model?:string, onText?:(chunk:string)=>void}} [opts]
  * @returns {Promise<{text:string, usage:object|null, rateLimitType:string|null}>}
  */
-export async function distill(video, { model = DEFAULT_MODEL, onText = null } = {}) {
+export async function distill(video, { model = config.distillModel, onText = null } = {}) {
   const prompt = buildDistillPrompt(video);
 
   let streamed = "";

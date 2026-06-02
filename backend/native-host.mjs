@@ -60,7 +60,13 @@ async function dispatch(msg) {
     await summarize(msg);
   } catch (e) {
     // stderr only — stdout is the native-messaging channel. Chrome captures this.
-    console.error("[yt-distiller] summarize failed:", e?.stack || e?.message || e);
+    // Include the code and which input failed so the log is debuggable on its own.
+    console.error("[yt-distiller] summarize failed:", {
+      code: e?.code || "ERROR",
+      input: msg?.url || msg?.videoId || null,
+      mode: msg?.mode || "auto",
+      error: e?.stack || e?.message || String(e),
+    });
     send({ type: "error", code: e.code || "ERROR", message: e.message || String(e) });
   } finally {
     finish();
