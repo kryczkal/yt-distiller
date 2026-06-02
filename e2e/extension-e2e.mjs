@@ -68,25 +68,40 @@ try {
   await page.goto(`chrome-extension://${extId}/sidepanel.html`);
   ok("sidepanel.html loaded — connecting to native host…");
 
+  // Terminal state: on success the panel clears #status and reveals the
+  // #receipt footer ("Distilled · …"); on failure it leaves the error in
+  // #status. (null arg slot so the timeout lands in `options`, not the page-fn
+  // argument — otherwise Playwright's 30s default silently applies.)
   await page.waitForFunction(
-    () => /Distilled|No captions|error|Native host|Connection closed/i.test(document.getElementById("status")?.textContent || ""),
+    () => {
+      const receipt = document.getElementById("receipt");
+      const done = receipt && !receipt.hasAttribute("hidden") &&
+        /Distilled/i.test(document.getElementById("receipt-text")?.textContent || "");
+      const errored = /No captions|error|Native host|Connection closed/i.test(
+        document.getElementById("status")?.textContent || ""
+      );
+      return done || errored;
+    },
+    null,
     { timeout: 150000 }
   );
 
   const meta = (await page.textContent("#meta"))?.trim();
   const status = (await page.textContent("#status"))?.trim();
+  const receipt = (await page.textContent("#receipt-text"))?.trim();
   const summary = (await page.textContent("#summary"))?.trim();
   const mdBlocks = await page.locator("#summary p, #summary li, #summary strong, #summary h1, #summary h2, #summary h3").count();
   await page.screenshot({ path: path.join(import.meta.dirname, "native-e2e.png"), fullPage: true });
 
   console.log("\n--- META ---\n" + meta);
   console.log("--- STATUS ---\n" + status);
+  console.log("--- RECEIPT ---\n" + receipt);
   console.log(`--- SUMMARY (${summary?.length || 0} chars, ${mdBlocks} md blocks) ---\n` + (summary?.slice(0, 400) || "") + "…");
 
   if (/Native host (failed|produced)/i.test(status || "")) fail("native host did not run: " + status);
   else if ((summary?.length || 0) > 400 && mdBlocks > 0) ok("native-messaging distillation streamed + rendered in the side panel");
   else fail(`no distillation rendered (len=${summary?.length}, blocks=${mdBlocks}, status=${status})`);
-  if (/subscription/.test(status || "")) ok("status shows subscription billing");
+  if (/subscription/.test(receipt || "")) ok("receipt shows subscription billing");
   errors.length ? fail("page JS errors: " + errors.join("; ")) : ok("no page JS errors");
 } catch (e) {
   fail("e2e threw: " + (e?.stack || e?.message || e));
